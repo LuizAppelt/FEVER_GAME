@@ -28,6 +28,10 @@ namespace StomachAbyss.UI
         private const string KeyVSync      = "StomachAbyss_VSync";
         private const string KeyBrightness = "StomachAbyss_Brightness";
         private const string KeyShake      = "StomachAbyss_ScreenShake";
+        private const string KeyVhs        = "StomachAbyss_VhsIntensity";
+        private static readonly int PropGlobalVhsIntensity = Shader.PropertyToID("_StomachVhsIntensity");
+        private const string KeyCamDist    = "StomachAbyss_CameraDistanceScale";
+        private const string KeyFpsLimit   = "StomachAbyss_FpsLimitIndex";
 
         public static readonly Vector2Int[] SupportedResolutions =
         {
@@ -35,6 +39,8 @@ namespace StomachAbyss.UI
             new Vector2Int(1600, 900),
             new Vector2Int(1280, 720)
         };
+
+        public static readonly int[] SupportedFpsLimits = { 30, 60, 120 };
 
         private static bool s_initialized;
 
@@ -49,6 +55,9 @@ namespace StomachAbyss.UI
         public static bool VSyncEnabled { get; private set; } = true;
         public static float Brightness { get; private set; } = 1.0f;
         public static bool ScreenShakeEnabled { get; private set; } = true;
+        public static float VhsIntensity { get; private set; } = 0.20f;
+        public static float CameraDistanceScale { get; private set; } = 1.0f;
+        public static int FpsLimitIndex { get; private set; } = 1; // 60 FPS default
 
         public static event Action OnSettingsChanged;
 
@@ -69,12 +78,17 @@ namespace StomachAbyss.UI
             Fullscreen         = PlayerPrefs.GetInt(KeyFullscreen, Screen.fullScreen ? 1 : 0) == 1;
             ResolutionIndex    = Mathf.Clamp(PlayerPrefs.GetInt(KeyResIndex, 0), 0, SupportedResolutions.Length - 1);
             VSyncEnabled       = PlayerPrefs.GetInt(KeyVSync, 1) == 1;
-            Brightness         = Mathf.Clamp(PlayerPrefs.GetFloat(KeyBrightness, 1.0f), 0.5f, 1.5f);
-            ScreenShakeEnabled = PlayerPrefs.GetInt(KeyShake, 1) == 1;
+            Brightness          = Mathf.Clamp(PlayerPrefs.GetFloat(KeyBrightness, 1.0f), 0.5f, 1.5f);
+            ScreenShakeEnabled  = PlayerPrefs.GetInt(KeyShake, 1) == 1;
+            CameraDistanceScale = Mathf.Clamp(PlayerPrefs.GetFloat(KeyCamDist, 1.0f), 0.70f, 1.35f);
+            FpsLimitIndex       = Mathf.Clamp(PlayerPrefs.GetInt(KeyFpsLimit, 1), 0, SupportedFpsLimits.Length - 1);
+            VhsIntensity        = Mathf.Clamp01(PlayerPrefs.GetFloat(KeyVhs, 0.20f));
 
             ApplyAudioGlobal();
             ApplyVSync();
+            ApplyFpsLimit();
             ApplyBrightnessOverlay();
+            Shader.SetGlobalFloat(PropGlobalVhsIntensity, VhsIntensity);
         }
 
         public static float GetCategoryVolume(SoundCategory category)
@@ -97,6 +111,35 @@ namespace StomachAbyss.UI
             PlayerPrefs.SetFloat(KeyMaster, MasterVolume);
             ApplyAudioGlobal();
             NotifyChanged();
+        }
+
+        public static void SetCameraDistanceScale(float value)
+        {
+            if (!s_initialized) Initialize();
+            CameraDistanceScale = Mathf.Clamp(value, 0.70f, 1.35f);
+            PlayerPrefs.SetFloat(KeyCamDist, CameraDistanceScale);
+            NotifyChanged();
+        }
+
+        public static void SetFpsLimitIndex(int index)
+        {
+            if (!s_initialized) Initialize();
+            int len = SupportedFpsLimits.Length;
+            FpsLimitIndex = ((index % len) + len) % len;
+            PlayerPrefs.SetInt(KeyFpsLimit, FpsLimitIndex);
+            ApplyFpsLimit();
+            NotifyChanged();
+        }
+
+        public static string GetCurrentFpsLabel()
+        {
+            if (!s_initialized) Initialize();
+            return $"{SupportedFpsLimits[FpsLimitIndex]} FPS";
+        }
+
+        private static void ApplyFpsLimit()
+        {
+            Application.targetFrameRate = SupportedFpsLimits[FpsLimitIndex];
         }
 
         public static void SetMusicVolume(float value)
@@ -180,6 +223,15 @@ namespace StomachAbyss.UI
             if (!s_initialized) Initialize();
             ScreenShakeEnabled = enabled;
             PlayerPrefs.SetInt(KeyShake, ScreenShakeEnabled ? 1 : 0);
+            NotifyChanged();
+        }
+
+        public static void SetVhsIntensity(float value)
+        {
+            if (!s_initialized) Initialize();
+            VhsIntensity = Mathf.Clamp01(value);
+            PlayerPrefs.SetFloat(KeyVhs, VhsIntensity);
+            Shader.SetGlobalFloat(PropGlobalVhsIntensity, VhsIntensity);
             NotifyChanged();
         }
 

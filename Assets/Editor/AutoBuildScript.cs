@@ -7,7 +7,7 @@ namespace StomachAbyss.EditorTools
 {
     public static class AutoBuildScript
     {
-        [MenuItem("HELLFLESH/Build Standalone Windows64")]
+        [MenuItem("feVer/Build Standalone Windows64")]
         public static void BuildStandaloneWindows64()
         {
             string[] scenes = new string[]
@@ -16,7 +16,7 @@ namespace StomachAbyss.EditorTools
                 "Assets/Scenes/Stomach_Abyss.unity"
             };
 
-            string buildPath = "C:/Users/user/IdeaProjects/Game final/HELLFLESH_game/HELLFLESH.exe";
+            string buildPath = "C:/Users/user/IdeaProjects/Game final/feVer_game/feVer.exe";
 
             BuildPlayerOptions buildPlayerOptions = new BuildPlayerOptions();
             buildPlayerOptions.scenes = scenes;

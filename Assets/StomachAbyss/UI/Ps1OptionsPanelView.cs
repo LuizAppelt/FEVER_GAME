@@ -44,9 +44,14 @@ namespace StomachAbyss.UI
         // Video & Gameplay controls
         private UnityEngine.UI.Toggle _fullscreenToggle;
         private UnityEngine.UI.Text _resolutionValueText;
+        private UnityEngine.UI.Text _fpsValueText;
         private UnityEngine.UI.Toggle _vsyncToggle;
         private UnityEngine.UI.Slider _brightnessSlider;
         private UnityEngine.UI.Text _brightnessVal;
+        private UnityEngine.UI.Slider _camDistSlider;
+        private UnityEngine.UI.Text _camDistVal;
+        private UnityEngine.UI.Slider _vhsSlider;
+        private UnityEngine.UI.Text _vhsVal;
         private UnityEngine.UI.Toggle _shakeToggle;
 
         private bool _built;
@@ -228,8 +233,8 @@ namespace StomachAbyss.UI
             _videoPage = CreateUi("Page_Video", parent);
             Stretch(_videoPage.GetComponent<RectTransform>(), 0f, 0f, 0f, 0f);
 
-            float rowStep = 48f;
-            float topY = -8f;
+            float rowStep = 31f;
+            float topY = 0f;
 
             _fullscreenToggle = CreateToggleRow(_videoPage.transform, "TELA CHEIA", topY - rowStep * 0, v =>
             {
@@ -239,19 +244,33 @@ namespace StomachAbyss.UI
 
             CreateResolutionRow(_videoPage.transform, "RESOLUÇÃO", topY - rowStep * 1);
 
-            _vsyncToggle = CreateToggleRow(_videoPage.transform, "V-SYNC", topY - rowStep * 2, v =>
+            CreateFpsLimitRow(_videoPage.transform, "LIMITE DE FPS", topY - rowStep * 2);
+
+            _vsyncToggle = CreateToggleRow(_videoPage.transform, "V-SYNC", topY - rowStep * 3, v =>
             {
                 _onUiClickSfx?.Invoke();
                 GameSettingsManager.SetVSync(v);
             });
 
-            CreateSliderRow(_videoPage.transform, "BRILHO", topY - rowStep * 3, 0.5f, 1.5f, out _brightnessSlider, out _brightnessVal, v =>
+            CreateSliderRow(_videoPage.transform, "BRILHO", topY - rowStep * 4, 0.5f, 1.5f, out _brightnessSlider, out _brightnessVal, v =>
             {
                 GameSettingsManager.SetBrightness(v);
                 _brightnessVal.text = $"{Mathf.RoundToInt(v * 100f)}%";
             });
 
-            _shakeToggle = CreateToggleRow(_videoPage.transform, "TREMOR DE CÂMERA", topY - rowStep * 4, v =>
+            CreateSliderRow(_videoPage.transform, "DISTÂNCIA DA CÂMERA", topY - rowStep * 5, 0.70f, 1.35f, out _camDistSlider, out _camDistVal, v =>
+            {
+                GameSettingsManager.SetCameraDistanceScale(v);
+                _camDistVal.text = $"{Mathf.RoundToInt(v * 100f)}%";
+            });
+
+            CreateSliderRow(_videoPage.transform, "INTENSIDADE VHS", topY - rowStep * 6, 0f, 1f, out _vhsSlider, out _vhsVal, v =>
+            {
+                GameSettingsManager.SetVhsIntensity(v);
+                _vhsVal.text = $"{Mathf.RoundToInt(v * 100f)}%";
+            });
+
+            _shakeToggle = CreateToggleRow(_videoPage.transform, "TREMOR DE CÂMERA", topY - rowStep * 7, v =>
             {
                 _onUiClickSfx?.Invoke();
                 GameSettingsManager.SetScreenShake(v);
@@ -335,8 +354,11 @@ namespace StomachAbyss.UI
 
             if (_fullscreenToggle != null) _fullscreenToggle.SetIsOnWithoutNotify(GameSettingsManager.Fullscreen);
             if (_resolutionValueText != null) _resolutionValueText.text = GameSettingsManager.GetCurrentResolutionLabel();
+            if (_fpsValueText != null) _fpsValueText.text = GameSettingsManager.GetCurrentFpsLabel();
             if (_vsyncToggle != null) _vsyncToggle.SetIsOnWithoutNotify(GameSettingsManager.VSyncEnabled);
             SetSliderSilent(_brightnessSlider, _brightnessVal, GameSettingsManager.Brightness);
+            SetSliderSilent(_camDistSlider, _camDistVal, GameSettingsManager.CameraDistanceScale);
+            SetSliderSilent(_vhsSlider, _vhsVal, GameSettingsManager.VhsIntensity);
             if (_shakeToggle != null) _shakeToggle.SetIsOnWithoutNotify(GameSettingsManager.ScreenShakeEnabled);
         }
 
@@ -517,6 +539,46 @@ namespace StomachAbyss.UI
                 _onUiClickSfx?.Invoke();
                 GameSettingsManager.SetResolutionIndex(GameSettingsManager.ResolutionIndex + 1);
                 _resolutionValueText.text = GameSettingsManager.GetCurrentResolutionLabel();
+            });
+        }
+
+        private void CreateFpsLimitRow(Transform parent, string label, float anchoredY)
+        {
+            GameObject row = CreateUi($"Row_{label}", parent);
+            RectTransform rt = row.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0f, 1f);
+            rt.anchorMax = new Vector2(1f, 1f);
+            rt.pivot = new Vector2(0.5f, 1f);
+            rt.anchoredPosition = new Vector2(0f, anchoredY);
+            rt.sizeDelta = new Vector2(0f, 40f);
+
+            UnityEngine.UI.Text lbl = CreateText("Label", row.transform, label, 15, FontStyle.Bold, Ps1UiTheme.BoneWhiteText, TextAnchor.MiddleLeft);
+            RectTransform lRt = lbl.rectTransform;
+            lRt.anchorMin = new Vector2(0f, 0f);
+            lRt.anchorMax = new Vector2(0.42f, 1f);
+            lRt.offsetMin = Vector2.zero;
+            lRt.offsetMax = Vector2.zero;
+
+            CreateStepButton(row.transform, "BtnPrev", "<", new Vector2(-176f, 0f), () =>
+            {
+                _onUiClickSfx?.Invoke();
+                GameSettingsManager.SetFpsLimitIndex(GameSettingsManager.FpsLimitIndex - 1);
+                _fpsValueText.text = GameSettingsManager.GetCurrentFpsLabel();
+            });
+
+            _fpsValueText = CreateText("FpsValue", row.transform, GameSettingsManager.GetCurrentFpsLabel(), 15, FontStyle.Bold, Ps1UiTheme.BoneGold, TextAnchor.MiddleCenter);
+            RectTransform vRt = _fpsValueText.rectTransform;
+            vRt.anchorMin = new Vector2(1f, 0.5f);
+            vRt.anchorMax = new Vector2(1f, 0.5f);
+            vRt.pivot = new Vector2(1f, 0.5f);
+            vRt.anchoredPosition = new Vector2(-36f, 0f);
+            vRt.sizeDelta = new Vector2(136f, 30f);
+
+            CreateStepButton(row.transform, "BtnNext", ">", new Vector2(0f, 0f), () =>
+            {
+                _onUiClickSfx?.Invoke();
+                GameSettingsManager.SetFpsLimitIndex(GameSettingsManager.FpsLimitIndex + 1);
+                _fpsValueText.text = GameSettingsManager.GetCurrentFpsLabel();
             });
         }
 
