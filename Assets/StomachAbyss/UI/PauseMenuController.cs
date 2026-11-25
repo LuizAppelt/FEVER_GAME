@@ -101,6 +101,15 @@ namespace StomachAbyss.UI
         {
             if (!WasEscapePressedThisFrame()) return;
 
+            // Se o menu de mutacao do Virgilio ou o mapa 3D de Bonfire esta aberto (ou acabou de fechar neste frame), nao abre o pause
+            if (StomachAbyss.Progression.VirgilMutationMenuUI.IsOpen
+                || StomachAbyss.Progression.VirgilMutationMenuUI.WasClosedThisFrame
+                || StomachAbyss.Bonfire.BonfireMapUI.IsOpen
+                || StomachAbyss.Bonfire.BonfireMapUI.WasClosedThisFrame)
+            {
+                return;
+            }
+
             // Se um dialogo esta aberto (ou acabou de fechar neste frame), nao abre o pause
             VirgilDialogueUI dlg = FindAnyObjectByType<VirgilDialogueUI>();
             if (dlg != null && dlg.IsOpen)
@@ -365,9 +374,10 @@ namespace StomachAbyss.UI
         {
 #if ENABLE_INPUT_SYSTEM
             Keyboard kb = Keyboard.current;
-            if (kb != null && kb.escapeKey.wasPressedThisFrame) return true;
-#endif
+            return kb != null && kb.escapeKey.wasPressedThisFrame;
+#else
             return Input.GetKeyDown(KeyCode.Escape);
+#endif
         }
 
         private static void EnsureEventSystem()

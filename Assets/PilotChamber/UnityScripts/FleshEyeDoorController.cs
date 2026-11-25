@@ -10,6 +10,7 @@ namespace MapaEstomago
     /// - Globo ocular seguindo o jogador (ou a camera enquanto nao houver Player na cena)
     /// - Sequencia cinematica completa de ENGOLIR, MASTIGAR e CUSPIR o jogador!
     /// </summary>
+    [ExecuteAlways]
     public class FleshEyeDoorController : MonoBehaviour
     {
         public enum DoorActionState
@@ -71,6 +72,15 @@ namespace MapaEstomago
         public float pulseAmplitudeY = 0.018f;
         public float phaseOffset = 0f;
 
+        [Header("Visual V2 Procedural (Esôfago com Costelas & Texturas PS1)")]
+        [Tooltip("Desmarcado = usa o visual V2 esculpido com túnel de esôfago e costelas em todas as portas.")]
+        public bool useLegacyBlockyModel = false;
+        [Range(0.5f, 3.0f)]
+        public float visualScale = 1.65f;
+
+        private bool UseV2Visuals => !useLegacyBlockyModel;
+        private float EffectiveVisualScale => visualScale <= 0.05f ? 1.65f : visualScale;
+
         [Header("Referencias das Partes (auto-preenchidas pelo nome)")]
         [SerializeField] private Transform eyeball;
         [SerializeField] private Transform eyelidUpper;
@@ -78,6 +88,8 @@ namespace MapaEstomago
         [SerializeField] private Transform upperGum;
         [SerializeField] private Transform upperTeeth;
         [SerializeField] private Transform lowerJaw;
+        [SerializeField] private Transform tongue;
+        [SerializeField] private Transform tunnelRoot;
 
         private Vector3 _baseScale;
         private Vector3 _baseLocalPos;
@@ -93,6 +105,10 @@ namespace MapaEstomago
         private Quaternion _lowerJawBaseRot;
         private Vector3 _lowerJawBasePos;
         private Vector3 _lowerJawBaseScale;
+        private Quaternion _tongueBaseRot;
+        private Vector3 _tongueBasePos;
+        private Vector3 _tongueBaseScale;
+        private Vector3 _tunnelBaseScale = Vector3.one;
 
         private float _currentYaw;
         private float _currentPitch;
@@ -136,9 +152,84 @@ namespace MapaEstomago
             BindParts();
         }
 
+        private bool NeedsVisualRebuild()
+        {
+            Transform v = transform.Find("FleshEyeDoor_V2_Visuals");
+            if (v == null) return true;
+            MeshFilter mf = v.GetComponentInChildren<MeshFilter>();
+            MeshRenderer mr = v.GetComponentInChildren<MeshRenderer>();
+            if (mf == null || mf.sharedMesh == null || mr == null || mr.sharedMaterial == null) return true;
+            return false;
+        }
+
+        public void EnsureEditorPreview()
+        {
+            if (Application.isPlaying || !UseV2Visuals) return;
+            if (visualScale <= 0.05f) visualScale = 1.65f;
+
+            if (NeedsVisualRebuild())
+            {
+                FleshEyeDoorVisualBuilder.BuildOrReplaceVisuals(transform, EffectiveVisualScale);
+            }
+            else
+            {
+                Transform v = transform.Find("FleshEyeDoor_V2_Visuals");
+                if (v != null) v.localScale = Vector3.one * EffectiveVisualScale;
+            }
+        }
+
+        private void OnEnable()
+        {
+            EnsureEditorPreview();
+        }
+
+        private void OnValidate()
+        {
+            if (!Application.isPlaying && UseV2Visuals)
+            {
+                if (visualScale <= 0.05f) visualScale = 1.65f;
+                Transform v = transform.Find("FleshEyeDoor_V2_Visuals");
+                if (v != null) v.localScale = Vector3.one * EffectiveVisualScale;
+            }
+        }
+
         private void Awake()
         {
-            BindParts();
+            if (!Application.isPlaying)
+            {
+                EnsureEditorPreview();
+                return;
+            }
+
+            if (UseV2Visuals)
+            {
+                var rig = FleshEyeDoorVisualBuilder.BuildOrReplaceVisuals(transform, EffectiveVisualScale);
+                if (rig.visualRoot != null)
+                {
+                    eyeball = rig.eyeball;
+                    eyelidUpper = rig.eyelidUpper;
+                    eyelidLower = rig.eyelidLower;
+                    upperGum = rig.upperGum;
+                    upperTeeth = rig.upperTeeth;
+                    lowerJaw = rig.lowerJaw;
+                    tongue = rig.tongue;
+                    tunnelRoot = rig.tunnelRoot;
+                    // Calibrated jaw closure for the new V2 sculpted jaw & teeth
+                    biteUpperDropY = -0.34f;
+                    biteUpperPitchDeg = 14f;
+                    biteLowerRiseY = 0.86f;
+                    biteLowerPitchDeg = -18f;
+                }
+            }
+            else
+            {
+                BindParts();
+            }
+
+            if (transform.localScale.sqrMagnitude < 0.0001f)
+            {
+                transform.localScale = Vector3.one;
+            }
             _baseScale = transform.localScale;
             _baseLocalPos = transform.localPosition;
 
@@ -162,6 +253,16 @@ namespace MapaEstomago
                 _lowerJawBaseRot = lowerJaw.localRotation;
                 _lowerJawBasePos = lowerJaw.localPosition;
                 _lowerJawBaseScale = lowerJaw.localScale;
+            }
+            if (tongue != null)
+            {
+                _tongueBaseRot = tongue.localRotation;
+                _tongueBasePos = tongue.localPosition;
+                _tongueBaseScale = tongue.localScale;
+            }
+            if (tunnelRoot != null)
+            {
+                _tunnelBaseScale = tunnelRoot.localScale;
             }
 
             _nextBlinkTimer = Random.Range(0.8f, 2.4f);
@@ -226,6 +327,12 @@ namespace MapaEstomago
 
         private void Update()
         {
+            if (!Application.isPlaying)
+            {
+                EnsureEditorPreview();
+                return;
+            }
+
             if (_actionState == DoorActionState.Idle)
             {
                 UpdateDoorPulse();
@@ -410,12 +517,42 @@ namespace MapaEstomago
 
             if (lowerJaw != null)
             {
-                Vector3 posOff = new Vector3(-grindOffsetX * 0.6f, closeAmount * biteLowerRiseY, 0f);
-                Quaternion rotOff = Quaternion.Euler(closeAmount * biteLowerPitchDeg, -grindYawDeg * 0.6f, 0f);
-                float tongueStretchZ = closeAmount < 0f ? (1f + (-closeAmount) * 0.45f) : (1f + Mathf.Max(0f, closeAmount) * 0.08f);
+                // Fecha a mandibula de baixo subindo contra os dentoes superiores ao morder/mastigar!
+                float clampedClose = Mathf.Clamp(closeAmount, -0.45f, 1.15f);
+                Vector3 posOff = new Vector3(-grindOffsetX * 0.65f, clampedClose * biteLowerRiseY, Mathf.Max(0f, clampedClose) * 0.08f);
+                Quaternion rotOff = Quaternion.Euler(clampedClose * biteLowerPitchDeg, -grindYawDeg * 0.65f, 0f);
                 lowerJaw.localPosition = _lowerJawBasePos + posOff;
                 lowerJaw.localRotation = _lowerJawBaseRot * rotOff;
-                lowerJaw.localScale = new Vector3(_lowerJawBaseScale.x, _lowerJawBaseScale.y, _lowerJawBaseScale.z * tongueStretchZ);
+                lowerJaw.localScale = _lowerJawBaseScale;
+            }
+
+            if (tongue != null)
+            {
+                // Quando mastiga (closeAmount > 0), RECOLHE a lingua para dentro da boca!
+                // Quando cospe (closeAmount < 0), projeta a lingua para fora!
+                if (closeAmount >= 0f)
+                {
+                    float retract = Mathf.Clamp01(closeAmount * 1.15f);
+                    float zScale = Mathf.Lerp(1.0f, 0.16f, retract);
+                    float zPull = Mathf.Lerp(0f, -0.68f, retract);
+                    float yLift = Mathf.Lerp(0f, 0.14f, retract);
+                    tongue.localPosition = _tongueBasePos + new Vector3(0f, yLift, zPull);
+                    tongue.localRotation = _tongueBaseRot * Quaternion.Euler(-12f * retract, 0f, 0f);
+                    tongue.localScale = new Vector3(_tongueBaseScale.x * Mathf.Lerp(1f, 0.72f, retract), _tongueBaseScale.y, _tongueBaseScale.z * zScale);
+                }
+                else
+                {
+                    float extend = Mathf.Clamp01(-closeAmount * 1.8f);
+                    tongue.localPosition = _tongueBasePos + new Vector3(0f, -0.02f * extend, 0.22f * extend);
+                    tongue.localRotation = _tongueBaseRot * Quaternion.Euler(6f * extend, 0f, 0f);
+                    tongue.localScale = new Vector3(_tongueBaseScale.x * (1f + 0.08f * extend), _tongueBaseScale.y, _tongueBaseScale.z * (1f + 0.24f * extend));
+                }
+            }
+
+            if (tunnelRoot != null)
+            {
+                float gulpSwell = 1f + Mathf.Clamp01(closeAmount) * 0.09f;
+                tunnelRoot.localScale = new Vector3(_tunnelBaseScale.x * gulpSwell, _tunnelBaseScale.y * gulpSwell, _tunnelBaseScale.z);
             }
 
             if (eyelidUpper != null)
@@ -511,6 +648,11 @@ namespace MapaEstomago
             float beat2 = 0.72f * Mathf.Exp(-Mathf.Pow((cyc - 0.34f) / 0.08f, 2f));
             float pulse = beat1 + beat2;
 
+            if (_baseScale.sqrMagnitude < 0.0001f)
+            {
+                _baseScale = transform.localScale.sqrMagnitude > 0.0001f ? transform.localScale : Vector3.one;
+            }
+
             transform.localScale = new Vector3(
                 _baseScale.x * (1f + pulse * pulseAmplitudeXZ),
                 _baseScale.y * (1f + pulse * pulseAmplitudeY),
@@ -541,11 +683,26 @@ namespace MapaEstomago
 
             if (lowerJaw != null)
             {
-                float tongueWave = Mathf.Sin(t * mouthSpeed + 2.3f) * 0.70f + Mathf.Sin(t * mouthSpeed * 1.9f) * 0.30f;
+                float jawWave = Mathf.Sin(t * mouthSpeed + 2.3f) * 0.70f + Mathf.Sin(t * mouthSpeed * 1.9f) * 0.30f;
                 lowerJaw.localPosition = _lowerJawBasePos;
-                lowerJaw.localRotation = _lowerJawBaseRot * Quaternion.Euler(tongueWave * lowerJawPitchDeg, 0f, 0f);
+                lowerJaw.localRotation = _lowerJawBaseRot * Quaternion.Euler(jawWave * lowerJawPitchDeg, 0f, 0f);
                 float swell = 1f + 0.03f * Mathf.Sin(t * mouthSpeed * 2.0f + 0.5f);
                 lowerJaw.localScale = new Vector3(_lowerJawBaseScale.x * swell, _lowerJawBaseScale.y, _lowerJawBaseScale.z * swell);
+            }
+
+            if (tongue != null)
+            {
+                float breath = Mathf.Sin(t * mouthSpeed * 1.15f + 1.1f);
+                tongue.localPosition = Vector3.Lerp(tongue.localPosition, _tongueBasePos + new Vector3(0f, 0.01f * breath, 0.03f * breath), Time.deltaTime * 8f);
+                tongue.localRotation = Quaternion.Slerp(tongue.localRotation, _tongueBaseRot * Quaternion.Euler(breath * 2.5f, 0f, 0f), Time.deltaTime * 8f);
+                tongue.localScale = Vector3.Lerp(tongue.localScale, _tongueBaseScale, Time.deltaTime * 8f);
+            }
+
+            if (tunnelRoot != null)
+            {
+                float pWave = 1f + 0.025f * Mathf.Sin(t * beatsPerSecond * Mathf.PI * 2f);
+                Vector3 targetTunnelScale = new Vector3(_tunnelBaseScale.x * pWave, _tunnelBaseScale.y * pWave, _tunnelBaseScale.z);
+                tunnelRoot.localScale = Vector3.Lerp(tunnelRoot.localScale, targetTunnelScale, Time.deltaTime * 6f);
             }
         }
 

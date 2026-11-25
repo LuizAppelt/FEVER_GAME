@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using StomachAbyss.Bonfire;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -63,13 +64,98 @@ namespace MapaEstomago
         public float freeCameraMouthRadius = 2.6f;
         public float freeCameraHotkeyRadius = 9.0f;
 
+        [Header("Bonfire & Rede de Portas Vivas")]
+        [Tooltip("Ativa o sistema de Bonfire + Mapa 3D ao entrar em portas ja visitadas.")]
+        public bool enableBonfireSystem = true;
+        [Tooltip("ID persistente desta porta (deixe vazio para detectar automaticamente pelo nome da porta).")]
+        public string doorId = "";
+        [Tooltip("Slot no mapa 3D (0=Ilha Esquerda, 1=Meio Sul, 2=Meio Norte, 3=Ilha Direita). -1 = automatico.")]
+        public int mapSlotIndex = -1;
+
         private FleshEyeDoorController _myDoor;
         private Collider _col;
         private IsometricCameraFollow _isoCam;
 
+        public string GetResolvedDoorId()
+        {
+            if (!string.IsNullOrEmpty(doorId)) return doorId;
+            if (_myDoor == null) _myDoor = GetComponentInParent<FleshEyeDoorController>();
+            BonfireDoorNetwork.InferDoorIdentity(_myDoor, out string inferredId, out _);
+            return inferredId;
+        }
+
+        public int GetResolvedMapSlotIndex()
+        {
+            if (mapSlotIndex >= 0 && mapSlotIndex < BonfireDoorNetwork.TotalMapSlots) return mapSlotIndex;
+            if (_myDoor == null) _myDoor = GetComponentInParent<FleshEyeDoorController>();
+            BonfireDoorNetwork.InferDoorIdentity(_myDoor, out _, out int inferredSlot);
+            return inferredSlot;
+        }
+
         private static bool _isTransitionRunning;
         private static float _cooldownUntilTime;
+        private static FleshEyeDoorController s_lastSpitDoor;
+        private static bool s_mustLeaveLastSpitDoor;
         private static CanvasGroup _fadeCanvasGroup;
+        private static Transform s_activeActor;
+        private static List<Renderer> s_activeHiddenRenderers;
+        private static Vector3 s_activeOriginalScale = Vector3.one;
+        private static bool s_hasActiveOriginalScale;
+
+        public static bool IsTransitionRunning => _isTransitionRunning;
+
+        public static void ForceClearFade()
+        {
+            _isTransitionRunning = false;
+            BonfireMapUI.ForceCloseImmediate();
+            if (Time.timeScale < 0.01f)
+            {
+                Time.timeScale = 1f;
+            }
+            if (_fadeCanvasGroup != null)
+            {
+                _fadeCanvasGroup.alpha = 0f;
+            }
+            if (s_activeHiddenRenderers != null)
+            {
+                RestoreRenderersVisible(s_activeHiddenRenderers);
+                s_activeHiddenRenderers = null;
+            }
+            if (s_activeActor != null)
+            {
+                if (s_hasActiveOriginalScale && s_activeOriginalScale.sqrMagnitude > 0.001f)
+                {
+                    s_activeActor.localScale = s_activeOriginalScale;
+                }
+                CharacterController cc = s_activeActor.GetComponent<CharacterController>();
+                if (cc != null) cc.enabled = true;
+                SimplePlayerController spc = s_activeActor.GetComponent<SimplePlayerController>();
+                if (spc != null) spc.inputLocked = false;
+                s_activeActor = null;
+                s_hasActiveOriginalScale = false;
+            }
+            if (IsometricCameraFollow.Instance != null)
+            {
+                IsometricCameraFollow.Instance.lockInput = false;
+            }
+        }
+
+        private void OnEnable()
+        {
+            if (_myDoor == null) _myDoor = GetComponentInParent<FleshEyeDoorController>();
+            BonfireDoorNetwork.RegisterDoor(this);
+        }
+
+        private void OnDisable()
+        {
+            // Nao desregistra nem aborta transicao aqui: o zone culling pode desativar Cardia
+            // enquanto o jogador esta em outra ilha, mas a porta precisa continuar registrada para retorno!
+        }
+
+        private void OnDestroy()
+        {
+            BonfireDoorNetwork.UnregisterDoor(this);
+        }
 
         private void Awake()
         {
@@ -83,6 +169,19 @@ namespace MapaEstomago
 
         private void Update()
         {
+            if (s_mustLeaveLastSpitDoor && s_lastSpitDoor != null && _myDoor == s_lastSpitDoor && !_isTransitionRunning)
+            {
+                GameObject p = GameObject.FindGameObjectWithTag(triggerTag);
+                if (p != null)
+                {
+                    float dist = Vector3.Distance(p.transform.position, s_lastSpitDoor.transform.position);
+                    if (dist >= 4.0f && Time.time >= _cooldownUntilTime)
+                    {
+                        s_mustLeaveLastSpitDoor = false;
+                    }
+                }
+            }
+
             if (_isTransitionRunning || Time.time < _cooldownUntilTime) return;
             if (!allowFreeCameraTrigger) return;
 
@@ -116,13 +215,27 @@ namespace MapaEstomago
             }
         }
 
+        private void OnTriggerExit(Collider other)
+        {
+            if (s_mustLeaveLastSpitDoor && _myDoor != null && _myDoor == s_lastSpitDoor)
+            {
+                if (other.CompareTag(triggerTag) || other.GetComponentInParent<SimplePlayerController>() != null)
+                {
+                    s_mustLeaveLastSpitDoor = false;
+                }
+            }
+        }
+
         private void OnTriggerEnter(Collider other)
         {
             if (_isTransitionRunning || Time.time < _cooldownUntilTime) return;
+            if (s_mustLeaveLastSpitDoor && _myDoor != null && _myDoor == s_lastSpitDoor) return;
 
-            if (other.CompareTag(triggerTag) || other.name.ToLower().Contains("player"))
+            SimplePlayerController spc = other.GetComponentInParent<SimplePlayerController>();
+            if (spc != null || other.CompareTag(triggerTag) || other.name.ToLower().Contains("player"))
             {
-                StartTransition(other.transform);
+                Transform rootActor = spc != null ? spc.transform : other.transform;
+                StartTransition(rootActor);
             }
         }
 
@@ -143,7 +256,7 @@ namespace MapaEstomago
             if (_isTransitionRunning || Time.time < _cooldownUntilTime) return;
             if (_myDoor == null) _myDoor = GetComponentInParent<FleshEyeDoorController>();
 
-            StartCoroutine(SwallowChewAndSpitRoutine(actor));
+            DoorTransitionRunner.EnsureExists().StartCoroutine(SwallowChewAndSpitRoutine(actor));
         }
 
         private IEnumerator SwallowChewAndSpitRoutine(Transform actor)
@@ -159,9 +272,11 @@ namespace MapaEstomago
                 _isoCam.lockInput = true;
             }
 
-            // Desativa fisica do Player durante a animacao de ser engolido/cuspido
+            // Desativa fisica e input do Player durante a animacao de ser engolido/cuspido
             CharacterController cc = actor != null ? actor.GetComponent<CharacterController>() : null;
             Rigidbody rb = actor != null ? actor.GetComponent<Rigidbody>() : null;
+            SimplePlayerController actorPlayer = actor != null ? actor.GetComponent<SimplePlayerController>() : null;
+            if (actorPlayer != null) actorPlayer.inputLocked = true;
             bool hadRbKinematic = rb != null && rb.isKinematic;
             if (cc != null) cc.enabled = false;
             if (rb != null)
@@ -196,6 +311,9 @@ namespace MapaEstomago
                 ? _myDoor.GetMouthThroatWorldPos()
                 : transform.position - transform.forward * 0.35f + Vector3.up * 0.85f;
             Vector3 originalScale = movingSubject.localScale;
+            s_activeActor = actor;
+            s_activeOriginalScale = originalScale;
+            s_hasActiveOriginalScale = (actor != null);
 
             float elapsed = 0f;
             while (elapsed < biteCloseDuration)
@@ -219,13 +337,14 @@ namespace MapaEstomago
 
             // Esconde os renderers do jogador enquanto ele esta dentro da boca fechada sendo mastigado
             List<Renderer> hiddenRenderers = SetRenderersVisible(movingSubject, false);
+            s_activeHiddenRenderers = hiddenRenderers;
 
             // ------------------------------------------------------------------
-            // ETAPA 2: Mastigando o jogador + Inicio do Fade Out para Tela Preta
+            // ETAPA 2: Mastigando o jogador
             // ------------------------------------------------------------------
-            float chewBeforeFade = Mathf.Max(0.15f, chewDuration - fadeOutDuration * 0.65f);
+            float chewBeforeDecision = Mathf.Max(0.15f, chewDuration - fadeOutDuration * 0.65f);
             elapsed = 0f;
-            while (elapsed < chewBeforeFade)
+            while (elapsed < chewBeforeDecision)
             {
                 elapsed += Time.deltaTime;
                 if (_isoCam != null && actor == null && _myDoor != null)
@@ -237,36 +356,123 @@ namespace MapaEstomago
                 yield return null;
             }
 
-            // Fade Out para Tela Preta!
-            CanvasGroup fader = EnsureFadeCanvas();
-            elapsed = 0f;
-            while (elapsed < fadeOutDuration)
-            {
-                elapsed += Time.deltaTime;
-                fader.alpha = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(elapsed / Mathf.Max(0.01f, fadeOutDuration)));
-                yield return null;
-            }
-            fader.alpha = 1f;
+            // ------------------------------------------------------------------
+            // ETAPA 2.5: Sistema Bonfire — 1a entrada avanca; porta ja visitada abre Mapa 3D!
+            // ------------------------------------------------------------------
+            string myDoorId = GetResolvedDoorId();
+            int mySlot = GetResolvedMapSlotIndex();
+            bool shouldOpenBonfireMenu = enableBonfireSystem
+                                         && actor != null
+                                         && mySlot >= 0
+                                         && BonfireDoorNetwork.IsDoorUnlocked(myDoorId);
 
-            // ------------------------------------------------------------------
-            // ETAPA 3: Na Tela Preta -> Corta para a Porta do Proximo Mapa
-            // ------------------------------------------------------------------
-            if (mode == TransitionMode.LoadSceneByName && !string.IsNullOrEmpty(sceneToLoad))
+            FleshEyeDoorController selectedTravelDoor = null;
+            bool exitSameDoorWithoutFade = false;
+
+            if (shouldOpenBonfireMenu)
             {
-                AsyncOperation asyncLoad = SceneManager.LoadSceneAsync(sceneToLoad);
-                if (asyncLoad != null)
+                if (_myDoor != null)
                 {
-                    while (!asyncLoad.isDone)
+                    _myDoor.PrepareClosedForSpit();
+                }
+
+                // Cura vida e Estus imediatamente ao entrar no abrigo da porta
+                if (actorPlayer != null)
+                {
+                    actorPlayer.ClearAllConditions();
+                    actorPlayer.Heal(actorPlayer.maxHealth);
+                    actorPlayer.RefillEstus();
+                }
+
+                bool menuCompleted = false;
+                int chosenSlot = -1;
+                bool choseExitSameDoor = false;
+
+                BonfireMapUI.Show(
+                    mySlot,
+                    onTravelToSlot: slot =>
                     {
-                        yield return null;
+                        chosenSlot = slot;
+                        menuCompleted = true;
+                    },
+                    onExitSpitOut: () =>
+                    {
+                        choseExitSameDoor = true;
+                        menuCompleted = true;
+                    });
+
+                while (!menuCompleted)
+                {
+                    yield return null;
+                }
+
+                if (choseExitSameDoor || chosenSlot == mySlot)
+                {
+                    selectedTravelDoor = _myDoor;
+                    exitSameDoorWithoutFade = true;
+                }
+                else
+                {
+                    selectedTravelDoor = BonfireDoorNetwork.GetDoorForSlot(chosenSlot);
+                }
+            }
+
+            CanvasGroup fader = EnsureFadeCanvas();
+            if (!exitSameDoorWithoutFade)
+            {
+                // Fade Out para Tela Preta!
+                elapsed = 0f;
+                while (elapsed < fadeOutDuration)
+                {
+                    elapsed += Time.deltaTime;
+                    fader.alpha = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(elapsed / Mathf.Max(0.01f, fadeOutDuration)));
+                    yield return null;
+                }
+                fader.alpha = 1f;
+
+                // ------------------------------------------------------------------
+                // ETAPA 3: Na Tela Preta -> Corta para a Porta de Destino
+                // ------------------------------------------------------------------
+                if (selectedTravelDoor == null && mode == TransitionMode.LoadSceneByName && !string.IsNullOrEmpty(sceneToLoad))
+                {
+                    AsyncOperation asyncLoad = SceneManager.LoadSceneAsync(sceneToLoad);
+                    if (asyncLoad != null)
+                    {
+                        while (!asyncLoad.isDone)
+                        {
+                            yield return null;
+                        }
+                    }
+                    _isoCam = FindFirstObjectByType<IsometricCameraFollow>();
+                    if (_isoCam != null) _isoCam.lockInput = true;
+                }
+            }
+            else
+            {
+                fader.alpha = 0f;
+            }
+
+            FleshEyeDoorController targetDoor = selectedTravelDoor != null ? selectedTravelDoor : ResolveDestinationDoor();
+            Transform targetAnchor = targetDoor != null ? targetDoor.transform : destinationAnchor;
+
+            // Garante que a zona da porta de destino (ex: Cardia) esteja ativa antes de animar a cusparada!
+            if (targetDoor != null)
+            {
+                StomachAbyss.Performance.StomachPerformanceCuller.EnsureZoneActiveForPosition(targetDoor.transform.position);
+                if (!targetDoor.gameObject.activeInHierarchy)
+                {
+                    Transform p = targetDoor.transform;
+                    while (p != null)
+                    {
+                        if (!p.gameObject.activeSelf) p.gameObject.SetActive(true);
+                        p = p.parent;
                     }
                 }
-                _isoCam = FindFirstObjectByType<IsometricCameraFollow>();
-                if (_isoCam != null) _isoCam.lockInput = true;
             }
-
-            FleshEyeDoorController targetDoor = ResolveDestinationDoor();
-            Transform targetAnchor = targetDoor != null ? targetDoor.transform : destinationAnchor;
+            else if (targetAnchor != null)
+            {
+                StomachAbyss.Performance.StomachPerformanceCuller.EnsureZoneActiveForPosition(targetAnchor.position);
+            }
 
             // Calcula de onde o jogador vai sair (garganta da porta de destino) e onde vai cair (chao a frente)
             Vector3 spitOriginWorld;
@@ -282,7 +488,8 @@ namespace MapaEstomago
                 if (spitForwardDir.sqrMagnitude < 0.001f) spitForwardDir = Vector3.forward;
                 spitForwardDir.Normalize();
 
-                spitLandingWorld = targetDoor.transform.position + spitForwardDir * spitLandingDistance;
+                float effectiveSpitDist = Mathf.Max(spitLandingDistance, 5.4f);
+                spitLandingWorld = targetDoor.transform.position + spitForwardDir * effectiveSpitDist;
                 spitLandingWorld.y = SampleFloorHeight(spitLandingWorld, targetDoor.transform.position.y + 0.15f);
             }
             else if (targetAnchor != null)
@@ -325,7 +532,10 @@ namespace MapaEstomago
                 }
             }
 
-            yield return new WaitForSeconds(blackScreenHold);
+            if (!exitSameDoorWithoutFade)
+            {
+                yield return new WaitForSeconds(blackScreenHold);
+            }
 
             // ------------------------------------------------------------------
             // ETAPA 4: Fade In da Tela Preta + Porta de Destino Incha e COSPE!
@@ -336,27 +546,38 @@ namespace MapaEstomago
             }
 
             // Clareia a tela enquanto a porta de destino incha prestes a cuspir
-            float fadeAndSwellTime = Mathf.Max(fadeInDuration, preSpitSwellDuration);
             elapsed = 0f;
             bool revealedSubject = false;
 
             while (elapsed < preSpitSwellDuration)
             {
                 elapsed += Time.deltaTime;
-                fader.alpha = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(elapsed / Mathf.Max(0.01f, fadeInDuration)));
+                if (!exitSameDoorWithoutFade)
+                {
+                    fader.alpha = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(elapsed / Mathf.Max(0.01f, fadeInDuration)));
+                }
                 yield return null;
             }
 
             // A BOCA ABRE! Revela o jogador e lanca ele em um arco parabolico para fora da boca!
             RestoreRenderersVisible(hiddenRenderers);
+            s_activeHiddenRenderers = null;
             revealedSubject = true;
+
+            if (actorPlayer != null)
+            {
+                actorPlayer.respawnPosition = spitLandingWorld;
+            }
 
             elapsed = 0f;
             while (elapsed < spitFlightDuration)
             {
                 elapsed += Time.deltaTime;
-                float totalFadeElapsed = preSpitSwellDuration + elapsed;
-                fader.alpha = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(totalFadeElapsed / Mathf.Max(0.01f, fadeInDuration)));
+                if (!exitSameDoorWithoutFade)
+                {
+                    float totalFadeElapsed = preSpitSwellDuration + elapsed;
+                    fader.alpha = 1f - Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(totalFadeElapsed / Mathf.Max(0.01f, fadeInDuration)));
+                }
 
                 float t = Mathf.Clamp01(elapsed / Mathf.Max(0.01f, spitFlightDuration));
                 float horizT = 1f - Mathf.Pow(1f - t, 2.1f);
@@ -411,10 +632,22 @@ namespace MapaEstomago
                 if (!rb.isKinematic) rb.linearVelocity = Vector3.zero;
             }
 
-            SimplePlayerController spc = actor != null ? actor.GetComponent<SimplePlayerController>() : null;
+            SimplePlayerController spc = actorPlayer != null ? actorPlayer : (actor != null ? actor.GetComponent<SimplePlayerController>() : null);
             if (spc != null)
             {
                 spc.respawnPosition = spitLandingWorld;
+                spc.inputLocked = false;
+            }
+
+            // Aplica Bonfire: salva portas descobertas em disco, cura, recarrega Estus e renasce inimigos comuns!
+            if (enableBonfireSystem && actor != null)
+            {
+                BonfireDoorNetwork.UnlockDoor(myDoorId);
+                if (targetDoor != null)
+                {
+                    BonfireDoorNetwork.UnlockDoor(targetDoor);
+                }
+                BonfireDoorNetwork.PerformBonfireRest(spc, spitLandingWorld, playFeedback: true);
             }
 
             if (_isoCam != null)
@@ -426,7 +659,12 @@ namespace MapaEstomago
                 _isoCam.lockInput = false;
             }
 
-            _cooldownUntilTime = Time.time + 2.6f;
+            s_activeActor = null;
+            s_activeHiddenRenderers = null;
+            s_hasActiveOriginalScale = false;
+            s_lastSpitDoor = targetDoor;
+            s_mustLeaveLastSpitDoor = targetDoor != null;
+            _cooldownUntilTime = Time.time + 3.2f;
             _isTransitionRunning = false;
         }
 
@@ -476,12 +714,9 @@ namespace MapaEstomago
         private float SampleFloorHeight(Vector3 worldPos, float fallbackY)
         {
             Ray ray = new Ray(new Vector3(worldPos.x, worldPos.y + 6.0f, worldPos.z), Vector3.down);
-            if (Physics.Raycast(ray, out RaycastHit hit, 14.0f))
+            if (Physics.Raycast(ray, out RaycastHit hit, 14.0f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
             {
-                if (!hit.collider.isTrigger)
-                {
-                    return hit.point.y + 0.15f;
-                }
+                return hit.point.y + 0.15f;
             }
             return fallbackY;
         }
@@ -502,7 +737,7 @@ namespace MapaEstomago
             return list;
         }
 
-        private void RestoreRenderersVisible(List<Renderer> list)
+        private static void RestoreRenderersVisible(List<Renderer> list)
         {
             if (list == null) return;
             foreach (Renderer r in list)

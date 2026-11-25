@@ -462,6 +462,8 @@ MonoBehaviour:
   pulseAmplitudeXZ: 0.03
   pulseAmplitudeY: 0.018
   phaseOffset: 0
+  useLegacyBlockyModel: 0
+  visualScale: 1.65
   eyeball: {fileID: 5268009760653825251}
   eyelidUpper: {fileID: 6027475727659280201}
   eyelidLower: {fileID: 977410195428230628}

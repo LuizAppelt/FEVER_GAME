@@ -1244,7 +1244,11 @@ namespace MapaEstomago.Editor
             GameObject virusPrefab,
             FleshEyeDoorController cardiaExitDoor)
         {
-            GameObject connGroup = CreateSubGroup(root, ConnectionsGroupName, Vector3.zero);
+            GameObject connGroup = GameObject.Find(ConnectionsGroupName);
+            if (connGroup != null) Undo.DestroyObjectImmediate(connGroup);
+            connGroup = new GameObject(ConnectionsGroupName);
+            Undo.RegisterCreatedObjectUndo(connGroup, "Create " + ConnectionsGroupName);
+            connGroup.transform.position = root.position;
 
             GameObject arrivalDoorGo = InstantiateDoorPrefab(
                 connGroup.transform,
@@ -1260,9 +1264,13 @@ namespace MapaEstomago.Editor
                 DoorTransitionTrigger arrivalTrig = arrivalDoorGo.GetComponentInChildren<DoorTransitionTrigger>(true);
                 if (arrivalTrig != null)
                 {
-                    arrivalTrig.enabled = false;
+                    arrivalTrig.enabled = true;
+                    arrivalTrig.enableBonfireSystem = true;
+                    arrivalTrig.doorId = StomachAbyss.Bonfire.BonfireDoorNetwork.IdOssuaryArrival;
+                    arrivalTrig.mapSlotIndex = 1;
+                    arrivalTrig.destinationDoor = cardiaExitDoor;
                     Collider col = arrivalTrig.GetComponent<Collider>();
-                    if (col != null) col.enabled = false;
+                    if (col != null) { col.enabled = true; col.isTrigger = true; }
                 }
             }
 
