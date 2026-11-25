@@ -50,12 +50,18 @@ namespace MapaEstomago
         [Tooltip("Evento disparado quando o efeito residual termina por completo.")]
         public UnityEvent onAcidBurnEnd;
 
+        [Header("Splash & Efeitos")]
+        [Tooltip("Material de particula de gotas de acido ao cair na superficie (opcional).")]
+        public Material splashDropletMaterial;
+
         public bool logDebugTicks = true;
 
         private class BurnState
         {
             public GameObject target;
             public IAcidDamageable damageable;
+            public SimplePlayerController player;
+            public bool wasInside;
             public int colliderContacts;
             public float lingerRemaining;
             public float tickTimer;
@@ -98,8 +104,14 @@ namespace MapaEstomago
         {
             if (target == null) return;
 
-            if (_tracked.Remove(target))
+            if (_tracked.TryGetValue(target, out BurnState state))
             {
+                if (state.wasInside && state.player != null)
+                {
+                    state.player.SetInAcidPool(false);
+                    state.wasInside = false;
+                }
+                _tracked.Remove(target);
                 onAcidBurnEnd?.Invoke();
                 if (logDebugTicks)
                 {
@@ -131,11 +143,18 @@ namespace MapaEstomago
                 {
                     target = rootObj,
                     damageable = rootObj.GetComponentInParent<IAcidDamageable>() ?? rootObj.GetComponent<IAcidDamageable>(),
+                    player = player,
+                    wasInside = true,
                     colliderContacts = 1,
                     lingerRemaining = lingerDurationAfterExit,
                     tickTimer = 0f // aplica o primeiro tick imediatamente ao pisar
                 };
                 _tracked[rootObj] = state;
+                if (player != null)
+                {
+                    player.SetInAcidPool(true);
+                    SpawnAcidEntrySplash(rootObj.transform.position + Vector3.up * 0.25f);
+                }
                 onAcidBurnStart?.Invoke();
 
                 if (logDebugTicks)
@@ -145,8 +164,15 @@ namespace MapaEstomago
             }
             else
             {
+                bool reentered = state.colliderContacts == 0;
                 state.colliderContacts++;
                 state.lingerRemaining = lingerDurationAfterExit;
+                if (reentered && state.player != null && !state.wasInside)
+                {
+                    state.wasInside = true;
+                    state.player.SetInAcidPool(true);
+                    SpawnAcidEntrySplash(rootObj.transform.position + Vector3.up * 0.25f);
+                }
             }
         }
 
@@ -160,6 +186,11 @@ namespace MapaEstomago
                 state.colliderContacts = Mathf.Max(0, state.colliderContacts - 1);
                 if (state.colliderContacts == 0)
                 {
+                    if (state.wasInside && state.player != null)
+                    {
+                        state.wasInside = false;
+                        state.player.SetInAcidPool(false);
+                    }
                     // Garante a duracao total do dano residual a partir do momento que saiu
                     state.lingerRemaining = lingerDurationAfterExit;
                     if (logDebugTicks)
@@ -209,6 +240,11 @@ namespace MapaEstomago
                     float dps = isInside ? damagePerSecondInside : lingerDamagePerSecond;
                     float tickDamage = dps * tickInterval;
                     ApplyDamage(state, tickDamage, isInside);
+                    if (state.damageable is SimplePlayerController)
+                    {
+                        StomachAbyss.Combat.CombatSfxBank.Play(StomachAbyss.Combat.CombatSfxId.PlayerAcidBurn, isInside ? 0.72f : 0.48f, 0.92f, 1.08f, 0.45f);
+                        StomachAbyss.Combat.CombatCameraJuice.TriggerDamageVignette(isInside ? 0.42f : 0.24f, isAcid: true);
+                    }
                 }
             }
 
@@ -226,7 +262,14 @@ namespace MapaEstomago
 
         private void ApplyDamage(BurnState state, float amount, bool isInside)
         {
-            state.damageable?.TakeAcidDamage(amount);
+            if (state.player != null)
+            {
+                state.player.TakeEnvironmentalAcidDamage(amount);
+            }
+            else
+            {
+                state.damageable?.TakeAcidDamage(amount);
+            }
             onAcidTickDamage?.Invoke(amount);
 
             if (logDebugTicks)
@@ -234,6 +277,57 @@ namespace MapaEstomago
                 string phase = isInside ? "DENTRO" : $"RESIDUAL ({state.lingerRemaining:F1}s)";
                 Debug.Log($"[AcidDamageZone] {state.target.name} sofreu {amount:F1} de dano [{phase}].");
             }
+        }
+
+        private void SpawnAcidEntrySplash(Vector3 worldPos)
+        {
+            GameObject fxObj = new GameObject("AcidEntrySplashFX");
+            fxObj.transform.position = worldPos;
+
+            ParticleSystem ps = fxObj.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            var main = ps.main;
+            main.playOnAwake = false;
+            main.loop = false;
+            main.duration = 0.8f;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.35f, 0.72f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(2.8f, 5.8f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.14f, 0.30f);
+            main.gravityModifier = 1.6f;
+            main.startColor = new ParticleSystem.MinMaxGradient(
+                new Color(0.28f, 1.0f, 0.14f, 1f),
+                new Color(0.84f, 1.0f, 0.42f, 1f)
+            );
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+
+            var emission = ps.emission;
+            emission.enabled = false;
+
+            var shape = ps.shape;
+            shape.enabled = true;
+            shape.shapeType = ParticleSystemShapeType.Cone;
+            shape.angle = 48f;
+            shape.radius = 0.35f;
+            shape.rotation = new Vector3(-90f, 0f, 0f);
+
+            var psRenderer = fxObj.GetComponent<ParticleSystemRenderer>();
+            if (splashDropletMaterial != null)
+            {
+                psRenderer.sharedMaterial = splashDropletMaterial;
+            }
+            else
+            {
+                Shader sh = Shader.Find("Universal Render Pipeline/Particles/Unlit") ?? Shader.Find("Particles/Standard Unlit");
+                if (sh != null)
+                {
+                    Material mat = new Material(sh);
+                    mat.color = new Color(0.45f, 1.0f, 0.2f, 1f);
+                    psRenderer.sharedMaterial = mat;
+                }
+            }
+
+            ps.Emit(Random.Range(16, 24));
+            Destroy(fxObj, 1.5f);
         }
 
         private GameObject ResolveTarget(Collider other)

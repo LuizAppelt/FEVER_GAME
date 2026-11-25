@@ -160,7 +160,7 @@ namespace ImmuneEnemies
                     PlayerController?.TakeAcidDamage(deathExplosionDamage);
                 }
 
-                Destroy(gameObject);
+                gameObject.SetActive(false);
             }
         }
 

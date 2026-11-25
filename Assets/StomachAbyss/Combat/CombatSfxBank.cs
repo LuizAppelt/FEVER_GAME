@@ -29,7 +29,18 @@ namespace StomachAbyss.Combat
         FlameSlashLight = 18,
         FlameChargeIgnite = 19,
         FlameThrustDash = 20,
-        FlameBurnBurst = 21
+        FlameBurnBurst = 21,
+        FlameSlashLightAlt = 22,
+        KatanaIaidoHeavy = 23,
+        WeaponSwap = 24,
+        PlayerAcidBurn = 25,
+        PlayerHeal = 26,
+        PlayerDeath = 27,
+        PlayerFootstepFlesh = 28,
+        CheckpointLit = 29,
+        VirgilWhisper = 30,
+        EyePillarBurst = 31,
+        BossTeniaDeath = 32
     }
 
     /// <summary>
@@ -41,7 +52,7 @@ namespace StomachAbyss.Combat
     {
         public const string SfxFolder = "Assets/StomachAbyss/Audio/SFX";
         private const int ChannelPoolSize = 8;
-        private const int ClipCount = 22;
+        private const int ClipCount = 33;
 
         public static CombatSfxBank Instance { get; private set; }
 
@@ -63,6 +74,8 @@ namespace StomachAbyss.Combat
 
         [Header("Lamina Ardente (Flame Saber) SFX (Opcional - Fallback Procedural)")]
         public AudioClip flameSlashLight;
+        public AudioClip flameSlashLightAlt;
+        public AudioClip katanaIaidoHeavy;
         public AudioClip flameChargeIgnite;
         public AudioClip flameThrustDash;
         public AudioClip flameBurnBurst;
@@ -76,6 +89,17 @@ namespace StomachAbyss.Combat
         public AudioClip playerDash;
         public AudioClip playerJump;
         public AudioClip playerHurt;
+        public AudioClip playerAcidBurn;
+        public AudioClip playerHeal;
+        public AudioClip playerDeath;
+        public AudioClip playerFootstepFlesh;
+        public AudioClip weaponSwap;
+
+        [Header("World & Boss SFX")]
+        public AudioClip checkpointLit;
+        public AudioClip virgilWhisper;
+        public AudioClip eyePillarBurst;
+        public AudioClip bossTeniaDeath;
 
         [Header("Master Gain")]
         [Range(0f, 1.5f)]
@@ -179,11 +203,36 @@ namespace StomachAbyss.Combat
         }
 #endif
 
+        public void LoadRuntimeResourcesIfMissing()
+        {
+            if (swordSlashLight == null) swordSlashLight = Resources.Load<AudioClip>("Audio/SFX/SFX_Weapon_Greatsword_Swing");
+            if (swordSlamHeavy == null) swordSlamHeavy = Resources.Load<AudioClip>("Audio/SFX/SFX_Weapon_Greatsword_HeavySlam");
+            if (whipCrackLight == null) whipCrackLight = Resources.Load<AudioClip>("Audio/SFX/SFX_Weapon_Whip_Crack");
+            if (whipCrackHeavy == null) whipCrackHeavy = Resources.Load<AudioClip>("Audio/SFX/SFX_Weapon_Whip_Crack");
+            if (flameSlashLight == null) flameSlashLight = Resources.Load<AudioClip>("Audio/SFX/SFX_Weapon_Katana_Slash_1");
+            if (flameSlashLightAlt == null) flameSlashLightAlt = Resources.Load<AudioClip>("Audio/SFX/SFX_Weapon_Katana_Slash_2");
+            if (katanaIaidoHeavy == null) katanaIaidoHeavy = Resources.Load<AudioClip>("Audio/SFX/SFX_Weapon_Katana_Iaido_HeavyCut");
+            if (flameChargeIgnite == null) flameChargeIgnite = Resources.Load<AudioClip>("Audio/SFX/SFX_Weapon_Katana_FireSpecial_Slash");
+            if (flameThrustDash == null) flameThrustDash = Resources.Load<AudioClip>("Audio/SFX/SFX_Weapon_Katana_FireSpecial_Wave");
+            if (flameBurnBurst == null) flameBurnBurst = Resources.Load<AudioClip>("Audio/SFX/SFX_Weapon_Katana_FireSpecial_Slash");
+            if (weaponSwap == null) weaponSwap = Resources.Load<AudioClip>("Audio/SFX/SFX_Weapon_Swap_Equip");
+            if (playerHurt == null) playerHurt = Resources.Load<AudioClip>("Audio/SFX/SFX_Player_Hurt_Impact");
+            if (playerAcidBurn == null) playerAcidBurn = Resources.Load<AudioClip>("Audio/SFX/SFX_Player_Acid_Burn");
+            if (playerHeal == null) playerHeal = Resources.Load<AudioClip>("Audio/SFX/SFX_Player_Heal_Pulse");
+            if (playerDeath == null) playerDeath = Resources.Load<AudioClip>("Audio/SFX/SFX_Player_Death_Collapse");
+            if (playerFootstepFlesh == null) playerFootstepFlesh = Resources.Load<AudioClip>("Audio/SFX/SFX_Player_Footstep_WetFlesh");
+            if (checkpointLit == null) checkpointLit = Resources.Load<AudioClip>("Audio/SFX/SFX_World_Checkpoint_Lit");
+            if (virgilWhisper == null) virgilWhisper = Resources.Load<AudioClip>("Audio/SFX/SFX_World_Virgil_Whisper");
+            if (eyePillarBurst == null) eyePillarBurst = Resources.Load<AudioClip>("Audio/SFX/SFX_World_EyePillar_Burst");
+            if (bossTeniaDeath == null) bossTeniaDeath = Resources.Load<AudioClip>("Audio/SFX/SFX_Boss_Tenia_Death_Agony");
+        }
+
         public void EnsureInitialized()
         {
 #if UNITY_EDITOR
             LoadEditorClipsIfMissing();
 #endif
+            LoadRuntimeResourcesIfMissing();
             if (_pool2D == null || _pool2D.Length != ChannelPoolSize)
             {
                 _pool2D = new AudioSource[ChannelPoolSize];
@@ -364,9 +413,20 @@ namespace StomachAbyss.Combat
                 CombatSfxId.WhipFatigueEnter => whipFatigueEnter,
                 CombatSfxId.WhipFatigueReady => whipFatigueReady,
                 CombatSfxId.FlameSlashLight => flameSlashLight,
+                CombatSfxId.FlameSlashLightAlt => flameSlashLightAlt,
+                CombatSfxId.KatanaIaidoHeavy => katanaIaidoHeavy,
                 CombatSfxId.FlameChargeIgnite => flameChargeIgnite,
                 CombatSfxId.FlameThrustDash => flameThrustDash,
                 CombatSfxId.FlameBurnBurst => flameBurnBurst,
+                CombatSfxId.WeaponSwap => weaponSwap,
+                CombatSfxId.PlayerAcidBurn => playerAcidBurn,
+                CombatSfxId.PlayerHeal => playerHeal,
+                CombatSfxId.PlayerDeath => playerDeath,
+                CombatSfxId.PlayerFootstepFlesh => playerFootstepFlesh,
+                CombatSfxId.CheckpointLit => checkpointLit,
+                CombatSfxId.VirgilWhisper => virgilWhisper,
+                CombatSfxId.EyePillarBurst => eyePillarBurst,
+                CombatSfxId.BossTeniaDeath => bossTeniaDeath,
                 _ => null
             };
 

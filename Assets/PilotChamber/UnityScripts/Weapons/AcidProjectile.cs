@@ -118,31 +118,60 @@ namespace MapaEstomago
         {
             if (_visualSphere != null) return;
 
-            GameObject sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            sphere.name = "BubbleMesh";
-            sphere.transform.SetParent(transform, false);
-            Destroy(sphere.GetComponent<Collider>());
+            GameObject root = new GameObject("AcidGlobVisual");
+            root.transform.SetParent(transform, false);
+            _visualSphere = root.transform;
 
-            float scale = isHeavyBossBubble ? 0.88f : 0.42f;
-            sphere.transform.localScale = Vector3.one * scale;
-            _visualSphere = sphere.transform;
-
-            Renderer rend = sphere.GetComponent<Renderer>();
-            if (rend != null)
+            Material mat = acidMaterial;
+            if (mat == null)
             {
-                if (acidMaterial != null)
+                Shader s = Shader.Find("MapaEstomago/URP/PS1_GastricAcid")
+                    ?? Shader.Find("Universal Render Pipeline/Lit")
+                    ?? Shader.Find("Standard");
+                mat = new Material(s);
+                mat.color = new Color(0.28f, 0.98f, 0.22f, 0.94f);
+                if (mat.HasProperty("_EmissionColor"))
                 {
-                    rend.sharedMaterial = acidMaterial;
-                }
-                else
-                {
-                    Shader s = Shader.Find("MapaEstomago/URP/PS1_GastricAcid");
-                    if (s == null) s = Shader.Find("Universal Render Pipeline/Lit");
-                    Material fallback = new Material(s);
-                    fallback.color = new Color(0.32f, 0.96f, 0.22f, 0.92f);
-                    rend.sharedMaterial = fallback;
+                    mat.EnableKeyword("_EMISSION");
+                    mat.SetColor("_EmissionColor", new Color(0.35f, 1.85f, 0.22f, 1f));
                 }
             }
+
+            // Elongated pressurized bio-cannon acid glob
+            GameObject coreBlob = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            coreBlob.name = "AcidCoreBlob";
+            coreBlob.transform.SetParent(root.transform, false);
+            Destroy(coreBlob.GetComponent<Collider>());
+            float scale = isHeavyBossBubble ? 0.86f : 0.44f;
+            coreBlob.transform.localScale = new Vector3(scale * 0.85f, scale * 0.82f, scale * 1.48f);
+            Renderer rend = coreBlob.GetComponent<Renderer>();
+            if (rend != null) rend.sharedMaterial = mat;
+
+            // Orbiting satellite droplets for organic visceral silhouette
+            int dropCount = isHeavyBossBubble ? 4 : 2;
+            for (int i = 0; i < dropCount; i++)
+            {
+                float ang = (i / (float)dropCount) * Mathf.PI * 2f;
+                GameObject drop = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                drop.name = $"AcidDrop_{i}";
+                drop.transform.SetParent(root.transform, false);
+                Destroy(drop.GetComponent<Collider>());
+                float r = scale * 0.56f;
+                drop.transform.localPosition = new Vector3(Mathf.Cos(ang) * r, Mathf.Sin(ang) * r * 0.7f, -scale * (0.25f + i * 0.15f));
+                drop.transform.localScale = Vector3.one * (scale * 0.34f);
+                Renderer dr = drop.GetComponent<Renderer>();
+                if (dr != null) dr.sharedMaterial = mat;
+            }
+
+            // Dynamic emerald glow light on projectile
+            GameObject lightGo = new GameObject("AcidProjLight");
+            lightGo.transform.SetParent(root.transform, false);
+            Light pl = lightGo.AddComponent<Light>();
+            pl.type = LightType.Point;
+            pl.color = new Color(0.36f, 1.0f, 0.20f);
+            pl.intensity = isHeavyBossBubble ? 2.2f : 1.25f;
+            pl.range = isHeavyBossBubble ? 5.2f : 3.2f;
+            pl.shadows = LightShadows.None;
 
             GameObject trailGo = new GameObject("AcidTrail");
             trailGo.transform.SetParent(transform, false);
@@ -150,18 +179,18 @@ namespace MapaEstomago
 
             var main = _trailParticles.main;
             main.loop = true;
-            main.startLifetime = isHeavyBossBubble ? 0.38f : 0.22f;
-            main.startSpeed = new ParticleSystem.MinMaxCurve(0.4f, 1.4f);
-            main.startSize = new ParticleSystem.MinMaxCurve(isHeavyBossBubble ? 0.20f : 0.11f, isHeavyBossBubble ? 0.34f : 0.18f);
+            main.startLifetime = isHeavyBossBubble ? 0.42f : 0.24f;
+            main.startSpeed = new ParticleSystem.MinMaxCurve(0.4f, 1.6f);
+            main.startSize = new ParticleSystem.MinMaxCurve(isHeavyBossBubble ? 0.22f : 0.12f, isHeavyBossBubble ? 0.38f : 0.20f);
             main.startColor = new Color(0.45f, 1.0f, 0.25f, 0.95f);
             main.simulationSpace = ParticleSystemSimulationSpace.World;
 
             var emission = _trailParticles.emission;
-            emission.rateOverTime = isHeavyBossBubble ? 28f : 18f;
+            emission.rateOverTime = isHeavyBossBubble ? 36f : 22f;
 
             var shape = _trailParticles.shape;
             shape.shapeType = ParticleSystemShapeType.Sphere;
-            shape.radius = isHeavyBossBubble ? 0.32f : 0.12f;
+            shape.radius = isHeavyBossBubble ? 0.34f : 0.14f;
 
             ParticleSystemRenderer psRend = trailGo.GetComponent<ParticleSystemRenderer>();
             if (psRend != null && pixelParticleMaterial != null)
@@ -179,9 +208,9 @@ namespace MapaEstomago
 
             if (_visualSphere != null)
             {
-                float wobble = 1f + Mathf.Sin(Time.time * 18f) * 0.12f;
-                float baseScale = isHeavyBossBubble ? 0.88f : 0.42f;
-                _visualSphere.localScale = new Vector3(baseScale * wobble, baseScale * (2f - wobble), baseScale * wobble);
+                float wobble = 1f + Mathf.Sin(Time.time * 20f) * 0.12f;
+                _visualSphere.localScale = new Vector3(wobble, 2f - wobble, 1f + (wobble - 1f) * 0.5f);
+                _visualSphere.Rotate(0f, 0f, 240f * dt, Space.Self);
             }
 
             if (isHeavyBossBubble)
@@ -412,8 +441,12 @@ namespace MapaEstomago
         private float _elapsed;
         private float _tickTimer;
         private Transform _discTransform;
+        private Light _poolLight;
+        private readonly List<Transform> _blisters = new List<Transform>(6);
+        private readonly List<float> _blisterPhases = new List<float>(6);
         private ParticleSystem _bubblePs;
         private readonly HashSet<Object> _tickHitSet = new HashSet<Object>();
+        private static Mesh s_organicPuddleMesh;
 
         public void Initialize()
         {
@@ -423,31 +456,125 @@ namespace MapaEstomago
             _tickTimer = tickInterval;
         }
 
+        private static Mesh GetOrBuildOrganicPuddleMesh()
+        {
+            if (s_organicPuddleMesh != null) return s_organicPuddleMesh;
+
+            const int segs = 32;
+            const int rings = 2;
+            // Center vertex + 2 concentric organic wavy rings (inner raised core + outer irregular splash lobes)
+            var verts = new List<Vector3>(1 + segs * rings);
+            var uvs = new List<Vector2>(1 + segs * rings);
+            var tris = new List<int>(segs * 9);
+
+            verts.Add(new Vector3(0f, 0.045f, 0f));
+            uvs.Add(new Vector2(0.5f, 0.5f));
+
+            for (int r = 1; r <= rings; r++)
+            {
+                float ringFrac = r == 1 ? 0.58f : 1.0f;
+                float ringY = r == 1 ? 0.032f : 0.008f;
+                for (int i = 0; i < segs; i++)
+                {
+                    float a = (i / (float)segs) * Mathf.PI * 2f;
+                    // Multi-frequency organic puddle lobes (never a flat geometric circle!)
+                    float lobe = 1f
+                        + 0.16f * Mathf.Sin(a * 3f + 0.4f)
+                        + 0.11f * Mathf.Cos(a * 5f - 1.1f)
+                        + 0.07f * Mathf.Sin(a * 8f + 2.2f);
+                    float rad = ringFrac * lobe;
+                    float x = Mathf.Cos(a) * rad;
+                    float z = Mathf.Sin(a) * rad;
+                    verts.Add(new Vector3(x, ringY, z));
+                    uvs.Add(new Vector2(0.5f + x * 0.45f, 0.5f + z * 0.45f));
+                }
+            }
+
+            // Center fan
+            for (int i = 0; i < segs; i++)
+            {
+                int next = (i + 1) % segs;
+                tris.Add(0);
+                tris.Add(1 + next);
+                tris.Add(1 + i);
+            }
+
+            // Outer organic skirt ring
+            int innerStart = 1;
+            int outerStart = 1 + segs;
+            for (int i = 0; i < segs; i++)
+            {
+                int next = (i + 1) % segs;
+                int i0 = innerStart + i;
+                int i1 = innerStart + next;
+                int o0 = outerStart + i;
+                int o1 = outerStart + next;
+                tris.Add(i0);
+                tris.Add(i1);
+                tris.Add(o1);
+                tris.Add(i0);
+                tris.Add(o1);
+                tris.Add(o0);
+            }
+
+            Mesh m = new Mesh { name = "OrganicAcidPuddleMesh" };
+            m.SetVertices(verts);
+            m.SetUVs(0, uvs);
+            m.SetTriangles(tris, 0);
+            m.RecalculateNormals();
+            m.RecalculateBounds();
+            s_organicPuddleMesh = m;
+            return m;
+        }
+
         private void BuildPoolVisuals()
         {
-            GameObject disc = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
-            disc.name = "AcidPoolDisc";
-            disc.transform.SetParent(transform, false);
-            disc.transform.localPosition = Vector3.zero;
-            disc.transform.localScale = new Vector3(radius * 2f, 0.03f, radius * 2f);
-            Destroy(disc.GetComponent<Collider>());
-            _discTransform = disc.transform;
-
-            Renderer rend = disc.GetComponent<Renderer>();
-            if (rend != null)
+            Material mat = acidMaterial;
+            if (mat == null)
             {
-                if (acidMaterial != null)
+                Shader s = Shader.Find("MapaEstomago/URP/PS1_GastricAcid")
+                    ?? Shader.Find("Universal Render Pipeline/Lit")
+                    ?? Shader.Find("Standard");
+                mat = new Material(s);
+                mat.color = new Color(0.24f, 0.92f, 0.18f, 0.90f);
+                if (mat.HasProperty("_EmissionColor"))
                 {
-                    rend.sharedMaterial = acidMaterial;
+                    mat.EnableKeyword("_EMISSION");
+                    mat.SetColor("_EmissionColor", new Color(0.28f, 1.45f, 0.18f, 1f));
                 }
-                else
-                {
-                    Shader s = Shader.Find("MapaEstomago/URP/PS1_GastricAcid");
-                    if (s == null) s = Shader.Find("Universal Render Pipeline/Lit");
-                    Material fallback = new Material(s);
-                    fallback.color = new Color(0.28f, 0.92f, 0.22f, 0.85f);
-                    rend.sharedMaterial = fallback;
-                }
+            }
+
+            // Organic jagged puddle mesh (replaces plain cylinder)
+            GameObject puddle = new GameObject("OrganicAcidPuddle");
+            puddle.transform.SetParent(transform, false);
+            puddle.transform.localPosition = Vector3.zero;
+            puddle.transform.localRotation = Quaternion.Euler(0f, Random.Range(0f, 360f), 0f);
+            puddle.transform.localScale = new Vector3(radius * 0.25f, 1f, radius * 0.25f);
+            MeshFilter mf = puddle.AddComponent<MeshFilter>();
+            mf.sharedMesh = GetOrBuildOrganicPuddleMesh();
+            MeshRenderer rend = puddle.AddComponent<MeshRenderer>();
+            rend.sharedMaterial = mat;
+            rend.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            _discTransform = puddle.transform;
+
+            // 5 animated 3D acid blisters bubbling & popping on the puddle surface
+            _blisters.Clear();
+            _blisterPhases.Clear();
+            const int blisterCount = 5;
+            for (int i = 0; i < blisterCount; i++)
+            {
+                float ang = (i / (float)blisterCount) * Mathf.PI * 2f + Random.Range(-0.3f, 0.3f);
+                float dist = Random.Range(0.20f, 0.72f);
+                GameObject b = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                b.name = $"AcidBlister_{i}";
+                b.transform.SetParent(_discTransform, false);
+                Destroy(b.GetComponent<Collider>());
+                b.transform.localPosition = new Vector3(Mathf.Cos(ang) * dist, 0.03f, Mathf.Sin(ang) * dist);
+                b.transform.localScale = Vector3.one * 0.12f;
+                Renderer br = b.GetComponent<Renderer>();
+                if (br != null) br.sharedMaterial = mat;
+                _blisters.Add(b.transform);
+                _blisterPhases.Add(Random.Range(0f, Mathf.PI * 2f));
             }
 
             GameObject fx = new GameObject("PoolBubbles");
@@ -456,17 +583,17 @@ namespace MapaEstomago
 
             var main = _bubblePs.main;
             main.loop = true;
-            main.startLifetime = new ParticleSystem.MinMaxCurve(0.35f, 0.70f);
-            main.startSpeed = new ParticleSystem.MinMaxCurve(0.6f, 1.5f);
-            main.startSize = new ParticleSystem.MinMaxCurve(0.14f, 0.28f);
-            main.startColor = new Color(0.50f, 1.0f, 0.30f, 0.95f);
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.40f, 0.85f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(0.7f, 1.8f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.14f, 0.30f);
+            main.startColor = new Color(0.48f, 1.0f, 0.26f, 0.95f);
 
             var emission = _bubblePs.emission;
-            emission.rateOverTime = 24f;
+            emission.rateOverTime = 30f;
 
             var shape = _bubblePs.shape;
             shape.shapeType = ParticleSystemShapeType.Circle;
-            shape.radius = radius * 0.85f;
+            shape.radius = radius * 0.82f;
             shape.rotation = new Vector3(-90f, 0f, 0f);
 
             ParticleSystemRenderer psRend = fx.GetComponent<ParticleSystemRenderer>();
@@ -478,12 +605,12 @@ namespace MapaEstomago
             GameObject lightGo = new GameObject("PoolGlow");
             lightGo.transform.SetParent(transform, false);
             lightGo.transform.localPosition = new Vector3(0f, 0.55f, 0f);
-            Light l = lightGo.AddComponent<Light>();
-            l.type = LightType.Point;
-            l.color = new Color(0.38f, 1.0f, 0.16f);
-            l.intensity = 1.45f;
-            l.range = Mathf.Max(2.8f, radius * 1.55f);
-            l.shadows = LightShadows.None;
+            _poolLight = lightGo.AddComponent<Light>();
+            _poolLight.type = LightType.Point;
+            _poolLight.color = new Color(0.36f, 1.0f, 0.18f);
+            _poolLight.intensity = 1.85f;
+            _poolLight.range = Mathf.Max(3.2f, radius * 1.65f);
+            _poolLight.shadows = LightShadows.None;
         }
 
         private void Update()
@@ -498,13 +625,30 @@ namespace MapaEstomago
                 ApplyPoolTick();
             }
 
+            float lifeRatio = Mathf.Clamp01(1f - (_elapsed / Mathf.Max(0.1f, duration)));
+            float introScale = Mathf.SmoothStep(0.25f, 1f, Mathf.Clamp01(_elapsed / 0.14f));
+            float fadeScale = lifeRatio < 0.24f ? Mathf.Lerp(0.10f, 1f, lifeRatio / 0.24f) : 1f;
+            float pulse = 1f + Mathf.Sin(Time.time * 7.5f) * 0.035f;
+
             if (_discTransform != null)
             {
-                float lifeRatio = Mathf.Clamp01(1f - (_elapsed / Mathf.Max(0.1f, duration)));
-                float fadeScale = lifeRatio < 0.22f ? Mathf.Lerp(0.15f, 1f, lifeRatio / 0.22f) : 1f;
-                float pulse = 1f + Mathf.Sin(Time.time * 8f) * 0.03f;
-                float d = radius * 2f * fadeScale * pulse;
-                _discTransform.localScale = new Vector3(d, 0.03f, d);
+                float r = radius * introScale * fadeScale * pulse;
+                _discTransform.localScale = new Vector3(r, 1f, r);
+            }
+
+            for (int i = 0; i < _blisters.Count; i++)
+            {
+                Transform b = _blisters[i];
+                if (b == null) continue;
+                float cyc = Mathf.Repeat(Time.time * 1.85f + _blisterPhases[i], 1f);
+                // Inflates smoothly 0..0.82, then pops sharply 0.82..1.0
+                float bScale = cyc < 0.82f ? Mathf.Sin((cyc / 0.82f) * Mathf.PI * 0.5f) * 0.18f : (1f - (cyc - 0.82f) / 0.18f) * 0.05f;
+                b.localScale = new Vector3(bScale, bScale * 0.65f, bScale);
+            }
+
+            if (_poolLight != null)
+            {
+                _poolLight.intensity = 1.85f * fadeScale * (0.85f + 0.15f * Mathf.Sin(Time.time * 11f));
             }
 
             if (_elapsed >= duration)

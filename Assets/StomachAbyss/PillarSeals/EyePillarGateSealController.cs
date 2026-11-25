@@ -120,6 +120,7 @@ namespace StomachAbyss.PillarSeals
 
         private void HandlePillarDestroyed(EyePillarController pillar)
         {
+            CombatSfxBank.Play(CombatSfxId.EyePillarBurst, 0.90f, 0.94f, 1.06f, 0.10f);
             int idx = pillars.IndexOf(pillar);
             if (idx >= 0 && idx < sealEyeOrbs.Count && sealEyeOrbs[idx] != null)
             {

@@ -59,8 +59,8 @@ namespace MapaEstomago
         public float comboResetWindow = 0.90f;
         public float meleeBaseReach = 3.9f;
         public float snapReach = 4.9f;
-        public float meleeDamage = 22f;
-        public float snapDamage = 32f;
+        public float meleeDamage = 24f;
+        public float snapDamage = 36f;
 
         [Header("Ataque a Distancia (Copia do Boss)")]
         public int maxCharges = 3;
@@ -73,6 +73,12 @@ namespace MapaEstomago
         [Header("Debuff: Fadiga (5.0s)")]
         public float fatigueDuration = 5.0f;
         public float fatigueHitReduction = 1.0f;
+
+        [Header("Custo de Estamina")]
+        public float whipLightStaminaCost = 12f;
+        public float whipSnapStaminaCost = 17f;
+        public float acidBubbleStaminaCost = 15f;
+        public float acidHeavyBubbleStaminaCost = 24f;
         public float fatigueSnapHitReduction = 1.5f;
         public float fatigueMeleeSpeedPenalty = 0.20f;
 
@@ -117,16 +123,27 @@ namespace MapaEstomago
         private readonly List<Transform> _segments = new List<Transform>(12);
         private readonly List<Vector3> _segBasePos = new List<Vector3>(12);
         private readonly List<Quaternion> _segBaseRot = new List<Quaternion>(12);
+        private readonly List<Vector3> _segBaseScale = new List<Vector3>(12);
         private Transform _scolex;
         private Transform _scolexSuckers;
         private Transform _scolexHooks;
         private Transform _scolexAcid;
         private Vector3 _scolexBasePos;
         private Quaternion _scolexBaseRot;
+        private Vector3 _scolexBaseScale = Vector3.one;
         private Vector3 _scolexSuckersOffset;
         private Vector3 _scolexHooksOffset;
         private Vector3 _scolexAcidOffset;
         private bool _rigCached;
+
+        // Bio-Cannon Transformation Visuals (Modo a Distancia)
+        private float _cannonRecoil;
+        private Transform _cannonAttachRoot;
+        private Transform _cannonRingBack;
+        private Transform _cannonRingFront;
+        private Transform _cannonMawRoot;
+        private Transform _cannonAcidCore;
+        private Light _cannonMawLight;
 
         // Combate Melee
         private WhipMoveType _activeMove = WhipMoveType.None;
@@ -206,6 +223,7 @@ namespace MapaEstomago
 
             ResolveMountAndRig();
             ResolveVirusBones();
+            EnsureBioCannonVisuals();
             EnsureWhipTrail();
             EnsureGroundLandingCircle();
             CombatSfxBank.EnsureExists();
@@ -351,6 +369,7 @@ namespace MapaEstomago
             if (_meleeCooldownTimer > 0f) _meleeCooldownTimer = Mathf.Max(0f, _meleeCooldownTimer - dt);
             if (_shotCooldownTimer > 0f) _shotCooldownTimer = Mathf.Max(0f, _shotCooldownTimer - dt);
             if (_fatigueRecoveryPulse > 0f) _fatigueRecoveryPulse = Mathf.Max(0f, _fatigueRecoveryPulse - dt * 2.8f);
+            if (_cannonRecoil > 0f) _cannonRecoil = Mathf.Max(0f, _cannonRecoil - dt * 6.5f);
 
             UpdateFatigue(dt);
             UpdateMeleeComboState(dt);
@@ -411,9 +430,13 @@ namespace MapaEstomago
         private void TriggerNextMeleeCombo()
         {
             EnsureRuntimeInitialized();
+            int nextStep = (_comboStep % 3) + 1;
+            float staminaCost = nextStep == 3 ? whipSnapStaminaCost : whipLightStaminaCost;
+            if (_owner != null && !_owner.TryConsumeActionStamina(staminaCost)) return;
+
             float speedScale = _fatigueTimer > 0f ? (1f + fatigueMeleeSpeedPenalty) : 1f;
 
-            _comboStep = (_comboStep % 3) + 1;
+            _comboStep = nextStep;
             switch (_comboStep)
             {
                 case 1:
@@ -454,6 +477,7 @@ namespace MapaEstomago
 
             if (_owner != null)
             {
+                _owner.ApplyAttackMovementSlow(0.58f, _moveDuration * 0.75f);
                 float lunge = _activeMove == WhipMoveType.ForwardSnap ? 6.4f : 4.6f;
                 _owner.ApplyCombatLunge(_meleeDir, lunge, _activeMove == WhipMoveType.ForwardSnap ? 0.18f : 0.13f);
             }
@@ -526,7 +550,7 @@ namespace MapaEstomago
             Transform originTf = _owner != null ? _owner.transform : transform;
             bool isSnap = _activeMove == WhipMoveType.ForwardSnap;
             float reach = isSnap ? snapReach : meleeBaseReach;
-            float damage = isSnap ? snapDamage : meleeDamage;
+            float damage = (isSnap ? snapDamage : meleeDamage) * StomachAbyss.Progression.BiomassProgressionSystem.GetDamageMultiplier();
             float sphereRadius = isSnap ? 1.85f : 2.35f;
 
             Vector3 hitCenter = originTf.position + _meleeDir * (reach * 0.56f) + Vector3.up * 0.95f;
@@ -671,6 +695,15 @@ namespace MapaEstomago
                         0.032f,
                         isSnap
                     );
+                    if (isSnap)
+                    {
+                        CombatCameraJuice.Shake(0.30f, 0.16f);
+                        CombatCameraJuice.PunchFov(-1.4f, 0.14f);
+                    }
+                    else
+                    {
+                        CombatCameraJuice.Shake(0.14f, 0.10f);
+                    }
                 }
 
                 if (_isoCam != null)
@@ -886,7 +919,10 @@ namespace MapaEstomago
 
             if (_chargeTimer >= heavyChargeTime)
             {
-                FireAcidBubble(isHeavy: true);
+                if (_owner == null || _owner.TryConsumeActionStamina(acidHeavyBubbleStaminaCost))
+                {
+                    FireAcidBubble(isHeavy: true);
+                }
                 _isChargingHeavy = false;
                 _chargeTimer = 0f;
                 return;
@@ -894,7 +930,10 @@ namespace MapaEstomago
 
             if (leftReleased || !leftHeld)
             {
-                FireAcidBubble(isHeavy: false);
+                if (_owner == null || _owner.TryConsumeActionStamina(acidBubbleStaminaCost))
+                {
+                    FireAcidBubble(isHeavy: false);
+                }
                 _isChargingHeavy = false;
                 _chargeTimer = 0f;
             }
@@ -920,6 +959,13 @@ namespace MapaEstomago
             }
 
             _shotCooldownTimer = shotCooldown;
+            _cannonRecoil = isHeavy ? 1.0f : 0.52f;
+            SpawnCannonMuzzleBurst(spawnPos, originTf.forward, isHeavy);
+            CombatCameraJuice.Shake(isHeavy ? 0.36f : 0.16f, isHeavy ? 0.20f : 0.10f);
+            if (isHeavy)
+            {
+                CombatCameraJuice.PunchFov(-2.4f, 0.20f);
+            }
 
             if (_owner != null)
             {
@@ -1143,8 +1189,13 @@ namespace MapaEstomago
 
             float t = Time.time;
             bool inFatigue = _fatigueTimer > 0f;
-            float writheAmp = inFatigue ? 0.012f : (0.025f + _aimBlend * 0.020f);
-            float writheSpeed = inFatigue ? 1.8f : (3.6f + (_isChargingHeavy ? 5.0f : 0f));
+            float cannonT = (_activeMove == WhipMoveType.None) ? Mathf.SmoothStep(0f, 1f, _aimBlend) : 0f;
+            float chargeNorm = _isChargingHeavy ? Mathf.Clamp01(_chargeTimer / Mathf.Max(0.05f, heavyChargeTime)) : 0f;
+            float recoilZ = _cannonRecoil * 0.28f;
+            float recoilPitch = -_cannonRecoil * 14f;
+
+            float writheAmp = inFatigue ? 0.012f : (0.025f * (1f - cannonT * 0.72f));
+            float writheSpeed = inFatigue ? 1.8f : (3.6f + (_isChargingHeavy ? 6.0f : 0f));
 
             Vector3 prevEndDelta = Vector3.zero;
             int n = _segments.Count;
@@ -1157,7 +1208,7 @@ namespace MapaEstomago
                 float u = (i + 1) / (float)n; // 0..1 ao longo do chicote
                 float fatigueDroop = inFatigue ? -0.22f * u * u : 0f;
 
-                // Posicao alvo desenrolada em linha reta a frente (+Z local do whipRoot)
+                // 1) Posicao normal / chicotada desenrolada
                 Vector3 extendedLocalPos = new Vector3(
                     lateralSweep * u * 1.85f + Mathf.Sin(t * 16f - u * 5.5f) * (0.18f * unfurlStrength * u),
                     0.06f + verticalLift * u + fatigueDroop * 0.35f,
@@ -1166,15 +1217,33 @@ namespace MapaEstomago
 
                 float waveX = Mathf.Sin(t * writheSpeed - i * 0.55f) * writheAmp * u;
                 float waveY = Mathf.Cos(t * (writheSpeed * 0.85f) - i * 0.45f) * (writheAmp * 0.7f) * u;
-                Vector3 targetPos = Vector3.Lerp(_segBasePos[i], extendedLocalPos, Mathf.Clamp01(unfurlStrength * (0.45f + 0.65f * u)));
-                targetPos += new Vector3(waveX, waveY + fatigueDroop * 0.25f, 0f);
+                Vector3 whipTargetPos = Vector3.Lerp(_segBasePos[i], extendedLocalPos, Mathf.Clamp01(unfurlStrength * (0.45f + 0.65f * u)));
+                whipTargetPos += new Vector3(waveX, waveY + fatigueDroop * 0.25f, 0f);
 
+                // 2) Posicao Modo Canhao Parasita (segmentos comprimidos em tubo musculoso curto e grosso)
+                float barrelPulse = 1f + Mathf.Sin(t * (7f + chargeNorm * 12f) - u * 5.5f) * (0.08f + chargeNorm * 0.14f);
+                Vector3 cannonLocalPos = new Vector3(
+                    Mathf.Sin(t * 14f + i) * (0.008f * chargeNorm),
+                    0.04f + Mathf.Cos(t * 12f + i) * (0.008f * chargeNorm),
+                    0.12f + u * 1.12f - recoilZ * (0.55f + 0.45f * u)
+                );
+
+                Vector3 targetPos = Vector3.Lerp(whipTargetPos, cannonLocalPos, cannonT);
                 seg.localPosition = targetPos;
 
-                // Inclina cada segmento suavemente para o proximo ponto
-                float pitch = Mathf.Lerp(0f, -12f, _aimBlend * u) + (inFatigue ? 14f * u : 0f) + Mathf.Sin(t * writheSpeed - i * 0.5f) * 5.5f * u;
-                float yaw = Mathf.Cos(t * (writheSpeed * 0.9f) - i * 0.5f) * 6.5f * u + lateralSweep * 28f * u;
-                seg.localRotation = _segBaseRot[i] * Quaternion.Euler(pitch, yaw, 0f);
+                // Engrossa os segmentos em formato de canhao organico estriado (taper mais largo no meio/boca)
+                Vector3 baseScale = i < _segBaseScale.Count ? _segBaseScale[i] : Vector3.one;
+                float cannonWidth = Mathf.Lerp(1.65f, 2.35f, Mathf.Sin(u * Mathf.PI * 0.85f + 0.15f)) * barrelPulse * (1f + chargeNorm * 0.24f);
+                float cannonLength = 0.72f - _cannonRecoil * 0.18f;
+                Vector3 cannonScale = new Vector3(baseScale.x * cannonWidth, baseScale.y * cannonWidth, baseScale.z * cannonLength);
+                seg.localScale = Vector3.Lerp(baseScale, cannonScale, cannonT);
+
+                // Rotacao
+                float whipPitch = Mathf.Lerp(0f, -12f, _aimBlend * u) + (inFatigue ? 14f * u : 0f) + Mathf.Sin(t * writheSpeed - i * 0.5f) * 5.5f * u;
+                float whipYaw = Mathf.Cos(t * (writheSpeed * 0.9f) - i * 0.5f) * 6.5f * u + lateralSweep * 28f * u;
+                Quaternion whipRot = _segBaseRot[i] * Quaternion.Euler(whipPitch, whipYaw, 0f);
+                Quaternion cannonRot = _segBaseRot[i] * Quaternion.Euler(recoilPitch * u, 0f, Mathf.Sin(t * 3f + i) * 3f);
+                seg.localRotation = Quaternion.Slerp(whipRot, cannonRot, cannonT);
                 prevEndDelta = targetPos - _segBasePos[i];
             }
 
@@ -1185,16 +1254,22 @@ namespace MapaEstomago
                     0.10f + verticalLift + (inFatigue ? -0.32f : 0f),
                     4.72f
                 );
-                Vector3 scolexPos = Vector3.Lerp(_scolexBasePos, extendedScolexPos, Mathf.Clamp01(unfurlStrength * 1.1f));
-                scolexPos += prevEndDelta * 0.15f;
-                scolexPos.y += Mathf.Sin(t * writheSpeed) * (writheAmp * 1.2f);
+                Vector3 whipScolexPos = Vector3.Lerp(_scolexBasePos, extendedScolexPos, Mathf.Clamp01(unfurlStrength * 1.1f));
+                whipScolexPos += prevEndDelta * 0.15f;
+                whipScolexPos.y += Mathf.Sin(t * writheSpeed) * (writheAmp * 1.2f);
 
-                float scolexYaw = _isAiming ? Mathf.Sin(t * 9f) * 4f : Mathf.Sin(t * 3.5f) * 8f;
-                float scolexPitch = _isAiming ? -14f : (inFatigue ? 28f : 0f);
+                Vector3 cannonScolexPos = new Vector3(0f, 0.05f, 1.34f - recoilZ);
+                Vector3 scolexPos = Vector3.Lerp(whipScolexPos, cannonScolexPos, cannonT);
+
+                float scolexYaw = _isAiming ? Mathf.Sin(t * 9f) * 2.2f : Mathf.Sin(t * 3.5f) * 8f;
+                float scolexPitch = _isAiming ? recoilPitch : (inFatigue ? 28f : 0f);
                 Quaternion scolexRot = _scolexBaseRot * Quaternion.Euler(scolexPitch, scolexYaw, 0f);
 
                 _scolex.localPosition = scolexPos;
                 _scolex.localRotation = scolexRot;
+
+                float mawFlare = 1f + cannonT * (0.85f + chargeNorm * 0.35f);
+                _scolex.localScale = Vector3.Lerp(_scolexBaseScale, new Vector3(_scolexBaseScale.x * mawFlare, _scolexBaseScale.y * mawFlare, _scolexBaseScale.z * 1.15f), cannonT);
 
                 Vector3 worldDelta = scolexPos - _scolexBasePos;
                 if (_scolexSuckers != null)
@@ -1211,10 +1286,176 @@ namespace MapaEstomago
                 {
                     _scolexAcid.localPosition = _scolexAcidOffset + worldDelta;
                     _scolexAcid.localRotation = scolexRot;
-                    float acidScale = inFatigue ? 0.25f : (_isChargingHeavy ? 1.65f : (1.0f + _fatigueRecoveryPulse * 0.7f));
+                    float acidScale = inFatigue ? 0.25f : (_isChargingHeavy ? 1.95f : (1.0f + cannonT * 0.55f + _fatigueRecoveryPulse * 0.7f));
                     _scolexAcid.localScale = Vector3.one * acidScale;
                 }
             }
+
+            UpdateBioCannonAttachments(cannonT, chargeNorm, recoilZ, recoilPitch, inFatigue);
+        }
+
+        private void UpdateBioCannonAttachments(float cannonT, float chargeNorm, float recoilZ, float recoilPitch, bool inFatigue)
+        {
+            if (_cannonAttachRoot == null) return;
+
+            bool visible = cannonT > 0.02f;
+            if (_cannonAttachRoot.gameObject.activeSelf != visible)
+            {
+                _cannonAttachRoot.gameObject.SetActive(visible);
+            }
+            if (!visible) return;
+
+            float pulse = 1f + Mathf.Sin(Time.time * (8f + chargeNorm * 14f)) * (0.05f + chargeNorm * 0.12f);
+            float scaleT = Mathf.SmoothStep(0f, 1f, cannonT);
+
+            if (_cannonRingBack != null)
+            {
+                _cannonRingBack.localPosition = new Vector3(0f, 0.04f, 0.44f - recoilZ * 0.7f);
+                _cannonRingBack.localRotation = Quaternion.Euler(90f + recoilPitch * 0.4f, 0f, Time.time * 18f);
+                _cannonRingBack.localScale = new Vector3(0.46f, 0.055f, 0.46f) * scaleT * (1f + chargeNorm * 0.14f);
+            }
+            if (_cannonRingFront != null)
+            {
+                _cannonRingFront.localPosition = new Vector3(0f, 0.045f, 0.96f - recoilZ * 0.9f);
+                _cannonRingFront.localRotation = Quaternion.Euler(90f + recoilPitch * 0.7f, 0f, -Time.time * 22f);
+                _cannonRingFront.localScale = new Vector3(0.52f, 0.06f, 0.52f) * scaleT * (1f + chargeNorm * 0.18f);
+            }
+            if (_cannonMawRoot != null)
+            {
+                _cannonMawRoot.localPosition = new Vector3(0f, 0.05f, 1.38f - recoilZ);
+                _cannonMawRoot.localRotation = Quaternion.Euler(recoilPitch, 0f, Time.time * (12f + chargeNorm * 45f));
+                _cannonMawRoot.localScale = Vector3.one * scaleT * (1f + chargeNorm * 0.22f);
+            }
+            if (_cannonAcidCore != null)
+            {
+                float coreScale = inFatigue ? 0.12f : (0.24f + chargeNorm * 0.16f) * pulse;
+                _cannonAcidCore.localScale = Vector3.one * coreScale;
+            }
+            if (_cannonMawLight != null)
+            {
+                _cannonMawLight.intensity = inFatigue ? 0.25f : (1.5f + chargeNorm * 2.4f) * scaleT * pulse;
+            }
+        }
+
+        private void EnsureBioCannonVisuals()
+        {
+            if (_cannonAttachRoot != null || whipRoot == null) return;
+
+            GameObject root = new GameObject("Tenia_BioCannon_Attachments");
+            root.transform.SetParent(whipRoot, false);
+            _cannonAttachRoot = root.transform;
+
+            Shader litShader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+
+            Material ironMat = new Material(litShader);
+            ironMat.color = new Color(0.24f, 0.18f, 0.16f, 1f);
+            if (ironMat.HasProperty("_BaseColor")) ironMat.SetColor("_BaseColor", new Color(0.24f, 0.18f, 0.16f, 1f));
+            if (ironMat.HasProperty("_Metallic")) ironMat.SetFloat("_Metallic", 0.72f);
+            if (ironMat.HasProperty("_Smoothness")) ironMat.SetFloat("_Smoothness", 0.28f);
+
+            Material fangMat = new Material(litShader);
+            fangMat.color = new Color(0.86f, 0.81f, 0.70f, 1f);
+            if (fangMat.HasProperty("_BaseColor")) fangMat.SetColor("_BaseColor", new Color(0.86f, 0.81f, 0.70f, 1f));
+
+            Material acidCoreMat = acidMaterial != null ? acidMaterial : new Material(litShader);
+            if (acidMaterial == null)
+            {
+                acidCoreMat.color = new Color(0.32f, 1.0f, 0.22f, 1f);
+                if (acidCoreMat.HasProperty("_BaseColor")) acidCoreMat.SetColor("_BaseColor", new Color(0.32f, 1.0f, 0.22f, 1f));
+                if (acidCoreMat.HasProperty("_EmissionColor"))
+                {
+                    acidCoreMat.EnableKeyword("_EMISSION");
+                    acidCoreMat.SetColor("_EmissionColor", new Color(0.45f, 2.2f, 0.28f, 1f));
+                }
+            }
+
+            // 2 Rusted Iron Halo-Rings wrapping the muscular barrel
+            _cannonRingBack = CreateCannonIronRing("Cannon_IronRing_Back", _cannonAttachRoot, ironMat);
+            _cannonRingFront = CreateCannonIronRing("Cannon_IronRing_Front", _cannonAttachRoot, ironMat);
+
+            // Open circular toothed maw + glowing acid core at muzzle
+            GameObject mawGo = new GameObject("Cannon_Maw_Muzzle");
+            mawGo.transform.SetParent(_cannonAttachRoot, false);
+            _cannonMawRoot = mawGo.transform;
+
+            const int fangCount = 8;
+            for (int i = 0; i < fangCount; i++)
+            {
+                float ang = (i / (float)fangCount) * Mathf.PI * 2f;
+                GameObject fang = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                fang.name = $"Cannon_Fang_{i}";
+                fang.transform.SetParent(_cannonMawRoot, false);
+                Destroy(fang.GetComponent<Collider>());
+                fang.transform.localPosition = new Vector3(Mathf.Cos(ang) * 0.20f, Mathf.Sin(ang) * 0.20f, 0.08f);
+                fang.transform.localRotation = Quaternion.Euler(0f, 0f, ang * Mathf.Rad2Deg) * Quaternion.Euler(0f, 24f, 0f);
+                fang.transform.localScale = new Vector3(0.055f, 0.045f, 0.20f);
+                Renderer fr = fang.GetComponent<Renderer>();
+                if (fr != null) fr.sharedMaterial = fangMat;
+            }
+
+            GameObject core = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            core.name = "Cannon_AcidCore";
+            core.transform.SetParent(_cannonMawRoot, false);
+            Destroy(core.GetComponent<Collider>());
+            core.transform.localPosition = new Vector3(0f, 0f, -0.02f);
+            core.transform.localScale = Vector3.one * 0.24f;
+            Renderer cr = core.GetComponent<Renderer>();
+            if (cr != null) cr.sharedMaterial = acidCoreMat;
+            _cannonAcidCore = core.transform;
+
+            GameObject lightGo = new GameObject("Cannon_MawLight");
+            lightGo.transform.SetParent(_cannonMawRoot, false);
+            lightGo.transform.localPosition = new Vector3(0f, 0f, 0.14f);
+            _cannonMawLight = lightGo.AddComponent<Light>();
+            _cannonMawLight.type = LightType.Point;
+            _cannonMawLight.color = new Color(0.35f, 1.0f, 0.22f);
+            _cannonMawLight.range = 4.2f;
+            _cannonMawLight.intensity = 0f;
+            _cannonMawLight.shadows = LightShadows.None;
+
+            _cannonAttachRoot.gameObject.SetActive(false);
+        }
+
+        private static Transform CreateCannonIronRing(string name, Transform parent, Material mat)
+        {
+            GameObject ring = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            ring.name = name;
+            ring.transform.SetParent(parent, false);
+            Destroy(ring.GetComponent<Collider>());
+            Renderer r = ring.GetComponent<Renderer>();
+            if (r != null) r.sharedMaterial = mat;
+            return ring.transform;
+        }
+
+        private void SpawnCannonMuzzleBurst(Vector3 pos, Vector3 forward, bool isHeavy)
+        {
+            GameObject fx = new GameObject("BioCannon_MuzzleBurst");
+            fx.transform.position = pos;
+            fx.transform.rotation = Quaternion.LookRotation(forward.sqrMagnitude > 0.001f ? forward : Vector3.forward, Vector3.up);
+
+            ParticleSystem ps = fx.AddComponent<ParticleSystem>();
+            var main = ps.main;
+            main.loop = false;
+            main.duration = 0.35f;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.14f, 0.30f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(isHeavy ? 4.5f : 3.0f, isHeavy ? 9.5f : 6.0f);
+            main.startSize = new ParticleSystem.MinMaxCurve(isHeavy ? 0.14f : 0.09f, isHeavy ? 0.26f : 0.16f);
+            main.startColor = new Color(0.45f, 1.0f, 0.24f, 1f);
+            main.gravityModifier = 0.45f;
+            main.stopAction = ParticleSystemStopAction.Destroy;
+
+            var emission = ps.emission;
+            emission.enabled = false;
+
+            var shape = ps.shape;
+            shape.shapeType = ParticleSystemShapeType.Cone;
+            shape.angle = isHeavy ? 34f : 22f;
+            shape.radius = 0.12f;
+
+            ParticleSystemRenderer pr = fx.GetComponent<ParticleSystemRenderer>();
+            if (pr != null && pixelParticleMaterial != null) pr.sharedMaterial = pixelParticleMaterial;
+
+            ps.Emit(isHeavy ? 22 : 11);
         }
 
         // =========================================================================
@@ -1249,6 +1490,7 @@ namespace MapaEstomago
             _segments.Clear();
             _segBasePos.Clear();
             _segBaseRot.Clear();
+            _segBaseScale.Clear();
 
             Transform[] segFound = new Transform[12];
             Transform[] children = whipRoot.GetComponentsInChildren<Transform>(true);
@@ -1277,6 +1519,7 @@ namespace MapaEstomago
                     _segments.Add(segFound[i]);
                     _segBasePos.Add(segFound[i].localPosition);
                     _segBaseRot.Add(segFound[i].localRotation);
+                    _segBaseScale.Add(segFound[i].localScale);
                 }
             }
 
@@ -1284,6 +1527,7 @@ namespace MapaEstomago
             {
                 _scolexBasePos = _scolex.localPosition;
                 _scolexBaseRot = _scolex.localRotation;
+                _scolexBaseScale = _scolex.localScale;
             }
             if (_scolexSuckers != null) _scolexSuckersOffset = _scolexSuckers.localPosition;
             if (_scolexHooks != null) _scolexHooksOffset = _scolexHooks.localPosition;

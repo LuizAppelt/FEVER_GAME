@@ -47,31 +47,37 @@ namespace MapaEstomago
         public float bladeFloatSpeed = 2.8f;
 
         [Header("Ataque Corpo a Corpo (Combo 3 Golpes & Estocada Sem Laminas)")]
-        public float slashSwingDuration = 0.36f;
-        public float slamSwingDuration = 0.46f;
+        public float slashSwingDuration = 0.44f;
+        public float slamSwingDuration = 0.56f;
         public float thrustDuration = 0.28f;
-        public float meleeCooldown = 0.42f;
+        public float meleeCooldown = 0.56f;
         public float thrustCooldown = 0.46f;
         public float comboResetWindow = 0.90f;
         public float meleeBaseReach = 3.25f;
-        public float meleeDamage = 48f;
+        public float meleeDamage = 34f;
 
         [Header("Disparo Longo Alcance (Bumerangue das 3 Laminas)")]
-        public float shotCooldown = 0.22f;
+        public float shotCooldown = 0.32f;
         public float projectileSpeed = 20f;
         public float projectileReturnSpeed = 14.5f;
         public float projectileRange = 16.5f;
-        public float projectileApexHover = 0.48f;
-        public float emptyBladesRecallDuration = 5.0f;
-        public float projectileDamage = 38f;
+        public float projectileApexHover = 0.35f;
+        public float emptyBladesRecallDuration = 2.5f;
+        public float projectileDamage = 15f;
+
+        [Header("Custo de Estamina")]
+        public float meleeLightStaminaCost = 14f;
+        public float meleeSlamStaminaCost = 20f;
+        public float thrustStaminaCost = 10f;
+        public float rangedShotStaminaCost = 16f;
 
         [Header("Rastro de Corte (Trail)")]
         public float meleeTrailDuration = 0.16f;
         public float meleeTrailWidth = 0.36f;
 
         [Header("Impacto e Game Feel")]
-        public float hitstopSlashDuration = 0.048f;
-        public float hitstopSlamDuration = 0.078f;
+        public float hitstopSlashDuration = 0.062f;
+        public float hitstopSlamDuration = 0.095f;
         public float cameraShakeIntensity = 0.14f;
 
         private readonly bool[] _bladeMounted = new bool[] { true, true, true };
@@ -626,6 +632,7 @@ namespace MapaEstomago
             EnsureRuntimeInitialized();
             if (AvailableBlades <= 0)
             {
+                if (_playerCtrl != null && !_playerCtrl.TryConsumeActionStamina(thrustStaminaCost)) return;
                 // Sem laminas: Estocada rapida e mais fraca com a haste da cruz
                 _activeMove = SwingMoveType.CrossThrust;
                 _moveDuration = thrustDuration;
@@ -634,13 +641,18 @@ namespace MapaEstomago
                 _comboStep = 0;
                 _hitApplied = false;
 
+                _playerCtrl?.ApplyAttackMovementSlow(0.32f, _moveDuration * 0.85f);
                 _playerCtrl?.ApplyCombatLunge(transform.forward, 6.2f, 0.14f);
                 CombatSfxBank.Play(CombatSfxId.CrossThrust, 0.86f, 0.96f, 1.08f, 0.04f);
                 return;
             }
 
             // Combo de 3 golpes com as laminas acopladas
-            _comboStep = (_comboStep % 3) + 1;
+            int nextStep = (_comboStep % 3) + 1;
+            float meleeCost = nextStep == 3 ? meleeSlamStaminaCost : meleeLightStaminaCost;
+            if (_playerCtrl != null && !_playerCtrl.TryConsumeActionStamina(meleeCost)) return;
+
+            _comboStep = nextStep;
             switch (_comboStep)
             {
                 case 1:
@@ -666,6 +678,7 @@ namespace MapaEstomago
                     break;
             }
 
+            _playerCtrl?.ApplyAttackMovementSlow(0.32f, _moveDuration * 0.85f);
             _moveTimer = _moveDuration;
             _hitApplied = false;
             _comboResetTimer = comboResetWindow;
@@ -704,6 +717,7 @@ namespace MapaEstomago
             }
 
             if (slotToFire < 0) return false;
+            if (_playerCtrl != null && !_playerCtrl.TryConsumeActionStamina(rangedShotStaminaCost)) return false;
 
             _bladeMounted[slotToFire] = false;
             _shotCooldownTimer = shotCooldown;
@@ -773,7 +787,7 @@ namespace MapaEstomago
                 projectileSpeed,
                 projectileReturnSpeed,
                 projectileRange,
-                projectileDamage,
+                projectileDamage * StomachAbyss.Progression.BiomassProgressionSystem.GetDamageMultiplier(),
                 projectileApexHover
             );
 
@@ -811,7 +825,24 @@ namespace MapaEstomago
             Vector3 slotPos = GetSlotWorldPosition(slotIndex);
             EmitSparksAt(slotPos, 10);
             CombatSfxBank.Play(CombatSfxId.RazorReturnLock, 0.86f, 0.95f + slotIndex * 0.05f, 1.01f + slotIndex * 0.05f, 0.065f);
-            _playerCtrl?.TriggerWeaponFlash(new Color(0.85f, 1.4f, 1.9f, 1f), 0.12f, 1.6f);
+
+            // Feedback visual e sonoro marcante quando TODAS as 3 laminas estao travadas de volta na espada
+            if (AvailableBlades == 3)
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    _slotReloadFlash[i] = 1.35f;
+                    EmitSparksAt(GetSlotWorldPosition(i), 12);
+                }
+                _playerCtrl?.TriggerWeaponFlash(new Color(0.55f, 2.2f, 2.6f, 1f), 0.28f, 2.35f);
+                CombatSfxBank.Play(CombatSfxId.RazorReturnLock, 0.98f, 1.24f, 1.32f, 0.04f);
+                PlaySfx(_clipHitClang, 0.34f, 1.38f);
+                _isoCam?.TriggerShake(cameraShakeIntensity * 0.45f, 0.11f);
+            }
+            else
+            {
+                _playerCtrl?.TriggerWeaponFlash(new Color(0.85f, 1.4f, 1.9f, 1f), 0.12f, 1.6f);
+            }
         }
 
         public void NotifyBladeImpact(Vector3 worldPos, bool damagedTarget)
@@ -850,6 +881,8 @@ namespace MapaEstomago
                 dmg = meleeDamage * bladeScale * comboMult;
             }
 
+            dmg *= StomachAbyss.Progression.BiomassProgressionSystem.GetDamageMultiplier();
+
             Vector3 hitCenter = transform.position + transform.forward * (reach * 0.56f) + Vector3.up * (isSlam ? 0.65f : 0.95f);
             Vector3 swingDir;
             switch (_activeMove)
@@ -873,8 +906,12 @@ namespace MapaEstomago
 
             if (isSlam)
             {
-                EmitSparksAt(transform.position + transform.forward * (reach * 0.75f) + Vector3.up * 0.25f, 18);
+                Vector3 slamPos = transform.position + transform.forward * (reach * 0.75f);
+                EmitSparksAt(slamPos + Vector3.up * 0.25f, 18);
                 _playerCtrl?.EmitCombatParticles(hitCenter, transform.rotation, 14);
+                CombatCameraJuice.Shake(0.48f, 0.24f);
+                CombatCameraJuice.PunchFov(-2.8f, 0.22f);
+                CombatCameraJuice.SpawnSlamShockwave(slamPos, 2.8f);
             }
 
             Collider[] cols = Physics.OverlapSphere(hitCenter, radius);
@@ -964,8 +1001,12 @@ namespace MapaEstomago
                 {
                     float clangVol = hitDamageable ? (isSlam ? 0.34f : 0.24f) : (isSlam ? 0.72f : 0.52f);
                     PlaySfx(_clipHitClang, clangVol, isThrust ? 0.88f : 1.02f);
-                    float hitstopDur = isSlam ? Mathf.Max(hitstopSlamDuration, 0.078f) : (isThrust ? 0.026f : Mathf.Max(hitstopSlashDuration, 0.048f));
+                    float hitstopDur = isSlam ? Mathf.Max(hitstopSlamDuration, 0.095f) : (isThrust ? 0.026f : Mathf.Max(hitstopSlashDuration, 0.062f));
                     CombatHitstopManager.TriggerHitstop(hitstopDur, 0.035f, isSlam);
+                    if (!isSlam)
+                    {
+                        CombatCameraJuice.Shake(isThrust ? 0.16f : 0.26f, isThrust ? 0.10f : 0.14f);
+                    }
                 }
                 if (_isoCam != null)
                 {
@@ -1092,7 +1133,7 @@ namespace MapaEstomago
                 {
                     case SwingMoveType.SlashRightToLeft:
                     {
-                        float s = SmoothSwingCurve(p, 0.18f, 0.68f);
+                        float s = EvaluateHeavySwingCurve(p);
                         coreEulerOffset = new Vector3(Mathf.Lerp(-6f, 10f, s), Mathf.Lerp(26f, -34f, s), 0f);
                         r1EulerTarget = Vector3.Lerp(new Vector3(-74f, 0f, 64f), new Vector3(-84f, 0f, -52f), s);
                         r2EulerTarget = new Vector3(-16f, 0f, 0f);
@@ -1101,7 +1142,7 @@ namespace MapaEstomago
                     }
                     case SwingMoveType.SlashLeftToRight:
                     {
-                        float s = SmoothSwingCurve(p, 0.16f, 0.66f);
+                        float s = EvaluateHeavySwingCurve(p);
                         coreEulerOffset = new Vector3(Mathf.Lerp(10f, -4f, s), Mathf.Lerp(-32f, 34f, s), 0f);
                         r1EulerTarget = Vector3.Lerp(new Vector3(-82f, 0f, -48f), new Vector3(-76f, 0f, 66f), s);
                         r2EulerTarget = new Vector3(-14f, 0f, 0f);
@@ -1110,17 +1151,17 @@ namespace MapaEstomago
                     }
                     case SwingMoveType.OverheadSlam:
                     {
-                        if (p < 0.34f)
+                        float heavy = EvaluateHeavySwingCurve(p);
+                        if (p < 0.35f)
                         {
-                            float w = p / 0.34f;
+                            float w = Mathf.Clamp01(heavy / 0.14f);
                             coreEulerOffset = Vector3.Lerp(Vector3.zero, new Vector3(-16f, 8f, 0f), w);
                             r1EulerTarget = Vector3.Lerp(new Vector3(-42f, 0f, 24f), new Vector3(-152f, 0f, 12f), w);
                             r2EulerTarget = Vector3.Lerp(new Vector3(-32f, 0f, 0f), new Vector3(-18f, 0f, 0f), w);
                         }
                         else
                         {
-                            float s = Mathf.Clamp01((p - 0.34f) / 0.38f);
-                            float eased = s * s * (3f - 2f * s);
+                            float eased = Mathf.Clamp01((heavy - 0.14f) / 0.86f);
                             coreEulerOffset = Vector3.Lerp(new Vector3(-16f, 8f, 0f), new Vector3(24f, -10f, 0f), eased);
                             r1EulerTarget = Vector3.Lerp(new Vector3(-152f, 0f, 12f), new Vector3(-34f, 0f, 8f), eased);
                             r2EulerTarget = new Vector3(-12f, 0f, 0f);
@@ -1171,6 +1212,33 @@ namespace MapaEstomago
             }
         }
 
+        /// <summary>
+        /// Non-linear heavy easing curve (No Rest for the Wicked feel):
+        /// 0.00..0.35: slow heavy windup (0.00 -> 0.14)
+        /// 0.35..0.72: explosive fast snap (0.14 -> 0.90)
+        /// 0.72..1.00: heavy decelerating follow-through (0.90 -> 1.00)
+        /// </summary>
+        private static float EvaluateHeavySwingCurve(float t)
+        {
+            t = Mathf.Clamp01(t);
+            if (t < 0.35f)
+            {
+                float w = t / 0.35f;
+                return w * w * 0.14f;
+            }
+            if (t < 0.72f)
+            {
+                float s = (t - 0.35f) / 0.37f;
+                float snap = s < 0.5f
+                    ? 4f * s * s * s
+                    : 1f - Mathf.Pow(-2f * s + 2f, 3f) * 0.5f;
+                return Mathf.Lerp(0.14f, 0.90f, snap);
+            }
+            float f = (t - 0.72f) / 0.28f;
+            float follow = 1f - (1f - f) * (1f - f);
+            return Mathf.Lerp(0.90f, 1.0f, follow);
+        }
+
         private static float SmoothSwingCurve(float progress, float windupEnd, float strikeEnd)
         {
             if (progress < windupEnd)
@@ -1218,7 +1286,7 @@ namespace MapaEstomago
                     case SwingMoveType.SlashLeftToRight:
                     {
                         float dirSign = _activeMove == SwingMoveType.SlashRightToLeft ? 1f : -1f;
-                        float s = Mathf.Clamp01(SmoothSwingCurve(p, 0.18f, 0.68f));
+                        float s = EvaluateHeavySwingCurve(p);
                         float yaw = Mathf.Lerp(105f * dirSign, -108f * dirSign, s);
                         weaponMount.localPosition = Vector3.Lerp(weaponMount.localPosition, handLocalPos, dt * 32f);
                         weaponMount.localRotation = Quaternion.Euler(0f, yaw, 0f);
@@ -1227,15 +1295,17 @@ namespace MapaEstomago
                     }
                     case SwingMoveType.OverheadSlam:
                     {
+                        float heavy = EvaluateHeavySwingCurve(p);
                         float pitch;
-                        if (p < 0.34f)
+                        if (p < 0.35f)
                         {
-                            pitch = Mathf.Lerp(idleHandSwordEuler.x, -65f, p / 0.34f);
+                            float w = Mathf.Clamp01(heavy / 0.14f);
+                            pitch = Mathf.Lerp(idleHandSwordEuler.x, -65f, w);
                         }
                         else
                         {
-                            float s = Mathf.Clamp01((p - 0.34f) / 0.38f);
-                            pitch = Mathf.Lerp(-65f, 112f, s * s * (3f - 2f * s));
+                            float slamT = Mathf.Clamp01((heavy - 0.14f) / 0.86f);
+                            pitch = Mathf.Lerp(-65f, 112f, slamT);
                         }
                         weaponMount.localPosition = Vector3.Lerp(weaponMount.localPosition, handLocalPos, dt * 32f);
                         weaponMount.localRotation = Quaternion.Euler(pitch, 0f, 0f);

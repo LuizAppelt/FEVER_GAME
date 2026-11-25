@@ -2,7 +2,9 @@ using System.Collections.Generic;
 using BossTenia;
 using MapaEstomago;
 using StomachAbyss.Combat;
+using StomachAbyss.Progression;
 using UnityEngine;
+using UnityEngine.AI;
 
 namespace ImmuneEnemies
 {
@@ -14,6 +16,7 @@ namespace ImmuneEnemies
     public abstract class ImmuneEnemyBase : MonoBehaviour, IAcidDamageable
     {
         private static readonly int PropEmissionColor = Shader.PropertyToID("_EmissionColor");
+        private static readonly List<ImmuneEnemyBase> s_allEnemies = new List<ImmuneEnemyBase>();
 
         private static GUIStyle s_labelStyle;
         private static Texture2D s_whiteTex;
@@ -26,6 +29,7 @@ namespace ImmuneEnemies
         public float leashRadius = 26f;
 
         [Header("Recompensa & Feedback")]
+        public int biomassReward = 30;
         public bool dropMinorHealOrbOnDeath = false;
         [Range(0f, 1f)]
         public float minorHealDropChance = 0.25f;
@@ -45,17 +49,35 @@ namespace ImmuneEnemies
         private readonly List<Color> _baseEmissions = new List<Color>(16);
         private MaterialPropertyBlock _mpb;
         private float _hitFlashTimer;
+        private float _hitRecoilTimer;
+        private float _hitRecoilDuration = 0.16f;
+        private float _hitRecoilStrength;
+        private float _microStaggerTimer;
         private float _deathElapsed;
         private float _hpBarVisibleTimer;
         private Vector3 _initialScale;
+        private Vector3 _spawnPosition;
+        private Quaternion _spawnRotation;
         private readonly RaycastHit[] _groundHits = new RaycastHit[16];
 
         protected virtual void Awake()
         {
             currentHealth = maxHealth;
             AnchorPosition = transform.position;
+            _spawnPosition = transform.position;
+            _spawnRotation = transform.rotation;
             _initialScale = transform.localScale;
             _mpb = new MaterialPropertyBlock();
+
+            if (biomassReward == 30)
+            {
+                biomassReward = maxHealth >= 150f ? 55 : (maxHealth <= 100f ? 25 : 35);
+            }
+
+            if (!s_allEnemies.Contains(this))
+            {
+                s_allEnemies.Add(this);
+            }
 
             AudioSrc = GetComponent<AudioSource>();
             if (AudioSrc == null) AudioSrc = gameObject.AddComponent<AudioSource>();
@@ -63,6 +85,87 @@ namespace ImmuneEnemies
             ImmuneEnemyAudio.EnsureInitialized();
 
             CacheRenderers();
+        }
+
+        protected virtual void OnDestroy()
+        {
+            s_allEnemies.Remove(this);
+        }
+
+        public int GetBiomassReward()
+        {
+            return Mathf.Max(0, biomassReward);
+        }
+
+        public static void RespawnAllEnemies()
+        {
+            for (int i = s_allEnemies.Count - 1; i >= 0; i--)
+            {
+                ImmuneEnemyBase enemy = s_allEnemies[i];
+                if (enemy == null)
+                {
+                    s_allEnemies.RemoveAt(i);
+                    continue;
+                }
+
+                enemy.RespawnAtOrigin();
+            }
+        }
+
+        public virtual void RespawnAtOrigin()
+        {
+            StopAllCoroutines();
+
+            if (!gameObject.activeSelf)
+            {
+                gameObject.SetActive(true);
+            }
+
+            currentHealth = maxHealth;
+            IsDead = false;
+            KnockbackVel = Vector3.zero;
+            _hitRecoilTimer = 0f;
+            _microStaggerTimer = 0f;
+            _hitFlashTimer = 0f;
+            _deathElapsed = 0f;
+            _hpBarVisibleTimer = 0f;
+            transform.localScale = _initialScale;
+
+            Collider[] cols = GetComponentsInChildren<Collider>(true);
+            for (int i = 0; i < cols.Length; i++)
+            {
+                if (cols[i] != null) cols[i].enabled = true;
+            }
+
+            Renderer[] rends = GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < rends.Length; i++)
+            {
+                if (rends[i] != null)
+                {
+                    rends[i].enabled = true;
+                    rends[i].SetPropertyBlock(null);
+                }
+            }
+
+            NavMeshAgent agent = GetComponent<NavMeshAgent>();
+            if (agent != null)
+            {
+                agent.enabled = false;
+                transform.position = _spawnPosition;
+                transform.rotation = _spawnRotation;
+                agent.enabled = true;
+                if (agent.isOnNavMesh)
+                {
+                    agent.Warp(_spawnPosition);
+                }
+            }
+            else
+            {
+                transform.position = _spawnPosition;
+                transform.rotation = _spawnRotation;
+            }
+
+            AnchorPosition = _spawnPosition;
         }
 
         protected virtual void Start()
@@ -89,10 +192,22 @@ namespace ImmuneEnemies
                 _hpBarVisibleTimer -= dt;
             }
 
-            if (KnockbackVel.sqrMagnitude > 0.001f)
+            UpdateHitRecoil(dt);
+
+            if (KnockbackVel.sqrMagnitude > 0.0025f)
             {
                 ApplyHorizontalStep(KnockbackVel * dt);
-                KnockbackVel = Vector3.MoveTowards(KnockbackVel, Vector3.zero, dt * 16f);
+                KnockbackVel *= Mathf.Exp(-dt * 11f);
+                if (KnockbackVel.sqrMagnitude <= 0.0025f)
+                {
+                    KnockbackVel = Vector3.zero;
+                }
+            }
+
+            if (_microStaggerTimer > 0f)
+            {
+                _microStaggerTimer = Mathf.Max(0f, _microStaggerTimer - dt);
+                return;
             }
 
             TickEnemyBehavior(dt);
@@ -143,14 +258,42 @@ namespace ImmuneEnemies
             float burstIntensity = (isCrit ? 1.32f : 1.0f) * (BloodSplatterSystem.HasActiveAttackContext ? BloodSplatterSystem.ContextIntensityMult : 1.0f);
             BloodSplatterSystem.SpawnBloodBurst(hitPos, attackDir, burstIntensity, bloodParticleColor, isCrit);
 
+            bool isHeavyHit = CombatSfxBank.IsHeavyAttackContext || amount >= 30f;
+            bool isMediumHit = !isHeavyHit && amount >= 20f;
+
+            Vector3 pushDir = Vector3.zero;
             if (PlayerTarget != null)
             {
                 Vector3 away = transform.position - PlayerTarget.position;
                 away.y = 0f;
                 if (away.sqrMagnitude > 0.001f)
                 {
-                    ApplyKnockback(away.normalized * 4.2f);
+                    pushDir = away.normalized;
                 }
+            }
+            else if (BloodSplatterSystem.HasActiveAttackContext)
+            {
+                Vector3 flatDir = BloodSplatterSystem.ContextAttackDir;
+                flatDir.y = 0f;
+                if (flatDir.sqrMagnitude > 0.001f)
+                {
+                    pushDir = flatDir.normalized;
+                }
+            }
+
+            if (pushDir.sqrMagnitude > 0.001f)
+            {
+                float knockbackStrength = isHeavyHit ? 7.5f : (isMediumHit ? 4.2f : 1.8f);
+                ApplyKnockback(pushDir * knockbackStrength);
+            }
+
+            _hitRecoilDuration = isHeavyHit ? 0.19f : (isMediumHit ? 0.16f : 0.13f);
+            _hitRecoilTimer = _hitRecoilDuration;
+            _hitRecoilStrength = isHeavyHit ? 0.22f : (isMediumHit ? 0.15f : 0.09f);
+
+            if (isHeavyHit && currentHealth > 0f)
+            {
+                _microStaggerTimer = Mathf.Max(_microStaggerTimer, 0.28f);
             }
 
             OnDamaged(finalDmg);
@@ -165,9 +308,9 @@ namespace ImmuneEnemies
         {
             horizontalImpulse.y = 0f;
             KnockbackVel += horizontalImpulse;
-            if (KnockbackVel.magnitude > 9f)
+            if (KnockbackVel.magnitude > 11f)
             {
-                KnockbackVel = KnockbackVel.normalized * 9f;
+                KnockbackVel = KnockbackVel.normalized * 11f;
             }
         }
 
@@ -181,12 +324,17 @@ namespace ImmuneEnemies
             IsDead = true;
             _deathElapsed = 0f;
             _hpBarVisibleTimer = 0f;
+            _hitRecoilTimer = 0f;
+            _microStaggerTimer = 0f;
+            transform.localScale = _initialScale;
 
             Collider[] cols = GetComponentsInChildren<Collider>(true);
             for (int i = 0; i < cols.Length; i++)
             {
                 if (cols[i] != null) cols[i].enabled = false;
             }
+
+            BiomassProgressionSystem.AwardBiomass(GetBiomassReward(), transform.position + Vector3.up * 0.8f);
 
             ImmuneEnemyAudio.Play(AudioSrc, ImmuneEnemyAudio.ClipDeathBurst, 0.82f, 0.88f, 1.08f);
             SpawnSplashParticles(transform.position + Vector3.up * 1.0f, bloodParticleColor, 14);
@@ -219,7 +367,7 @@ namespace ImmuneEnemies
 
             if (_deathElapsed >= 0.92f)
             {
-                Destroy(gameObject);
+                gameObject.SetActive(false);
             }
         }
 
@@ -336,6 +484,27 @@ namespace ImmuneEnemies
                 _hitFlashTimer = Mathf.Max(0f, _hitFlashTimer - dt);
                 SetOverrideEmissionTint(hitFlashColor, _hitFlashTimer / 0.16f);
             }
+        }
+
+        private void UpdateHitRecoil(float dt)
+        {
+            if (_hitRecoilTimer <= 0f) return;
+
+            _hitRecoilTimer = Mathf.Max(0f, _hitRecoilTimer - dt);
+            if (_hitRecoilTimer <= 0f)
+            {
+                transform.localScale = _initialScale;
+                return;
+            }
+
+            float normalized = _hitRecoilTimer / Mathf.Max(0.01f, _hitRecoilDuration);
+            float squash = Mathf.Sin(normalized * Mathf.PI) * _hitRecoilStrength;
+            float scaleXZ = 1f + squash;
+            float scaleY = 1f - squash * 0.85f;
+            transform.localScale = new Vector3(
+                _initialScale.x * scaleXZ,
+                _initialScale.y * scaleY,
+                _initialScale.z * scaleXZ);
         }
 
         protected static void SpawnSplashParticles(Vector3 pos, Color color, int count)

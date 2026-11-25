@@ -85,7 +85,7 @@ namespace BossTenia
             _clipLeapSlam = BuildLeapSlam();
             _clipClimbScrape = BuildClimbScrape();
             _clipStaggerCrash = BuildStaggerCrash();
-            _clipDefeatAgony = BuildDefeatAgony();
+            _clipDefeatAgony = Resources.Load<AudioClip>("Audio/SFX/SFX_Boss_Tenia_Death_Agony") ?? BuildDefeatAgony();
             _clipLowDeathGroan = BuildLowDeathGroan();
             _clipAcidMeltDissolve = BuildAcidMeltDissolve();
             _clipHealOrb = BuildHealOrbSound();

@@ -221,7 +221,7 @@ namespace MapaEstomago
 
             if (playSfx && Application.isPlaying)
             {
-                CombatSfxBank.Play(CombatSfxId.RazorReturnLock, 0.45f, 0.88f, 1.04f, 0.05f);
+                CombatSfxBank.Play(CombatSfxId.WeaponSwap, 0.78f, 0.95f, 1.06f, 0.05f);
             }
         }
 

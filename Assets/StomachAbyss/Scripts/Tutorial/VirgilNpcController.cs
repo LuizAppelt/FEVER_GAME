@@ -1,4 +1,5 @@
 using MapaEstomago;
+using StomachAbyss.Progression;
 using UnityEngine;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -48,6 +49,7 @@ namespace StomachAbyss.Tutorial
         private float _idlePhaseOffset;
         private float _lastDistToPlayer = float.MaxValue;
         private bool _hasSpoken;
+        private bool _bridgeCheckpointUnlocked;
 
         private void Awake()
         {
@@ -95,6 +97,20 @@ namespace StomachAbyss.Tutorial
             float dist = toPlayer.magnitude;
             _lastDistToPlayer = dist;
 
+            // Ao chegar perto do Virgilio da Ponte (antes da Catedral), ativa automaticamente o Checkpoint da Ponte
+            if (role == VirgilAppearanceRole.CathedralBridge && !_bridgeCheckpointUnlocked && _playerController != null && !_playerController.IsDead && dist <= 10.5f)
+            {
+                _bridgeCheckpointUnlocked = true;
+                Vector3 safeBridgeRespawn = transform.position + transform.forward * 2.2f;
+                safeBridgeRespawn.y = _playerTransform.position.y;
+                _playerController.respawnPosition = safeBridgeRespawn;
+                _playerController.RefillEstus();
+                _playerController.Heal(_playerController.maxHealth);
+                StomachAbyss.Combat.CombatSfxBank.Play(StomachAbyss.Combat.CombatSfxId.CheckpointLit, 0.85f, 0.97f, 1.03f, 0.5f);
+                StomachAbyss.Combat.CombatCameraJuice.PunchFov(-2.0f, 0.35f);
+                Debug.Log($"[Virgil Bridge Checkpoint] Checkpoint da Ponte ativado em: {safeBridgeRespawn}");
+            }
+
             if (autoFacePlayer && dist <= interactRadius * 1.75f && toPlayer.sqrMagnitude > 0.001f)
             {
                 Quaternion targetRot = Quaternion.LookRotation(toPlayer.normalized, Vector3.up);
@@ -105,11 +121,13 @@ namespace StomachAbyss.Tutorial
             bool playerAlive = _playerController == null || !_playerController.IsDead;
             bool inRange = playerAlive && dist <= interactRadius;
 
-            if (!inRange || ui.IsOpen)
+            if (!inRange || ui.IsOpen || VirgilMutationMenuUI.IsOpen)
             {
                 ReleasePromptOwnership();
                 return;
             }
+
+            bool canMutate = role == VirgilAppearanceRole.CardiaTutorial || role == VirgilAppearanceRole.CathedralBridge;
 
             bool canClaimPrompt =
                 s_promptOwner == null ||
@@ -121,17 +139,29 @@ namespace StomachAbyss.Tutorial
             if (canClaimPrompt)
             {
                 s_promptOwner = this;
-                ui.ShowInteractPrompt(true, $"[E] Falar com {npcName}");
+                string prompt = canMutate
+                    ? "[E] Falar com Virgílio   |   [F] Mutar Biomassa"
+                    : $"[E] Falar com {npcName}";
+                ui.ShowInteractPrompt(true, prompt);
             }
 
-            if (s_promptOwner == this && !ui.WasClosedThisFrame && WasInteractPressedThisFrame())
+            if (s_promptOwner == this && !ui.WasClosedThisFrame && !VirgilMutationMenuUI.WasClosedThisFrame)
             {
-                BeginConversation(ui);
+                if (WasInteractPressedThisFrame())
+                {
+                    BeginConversation(ui);
+                }
+                else if (canMutate && WasMutatePressedThisFrame())
+                {
+                    ReleasePromptOwnership();
+                    VirgilMutationMenuUI.Open(_playerController);
+                }
             }
         }
 
         private void BeginConversation(VirgilDialogueUI ui)
         {
+            StomachAbyss.Combat.CombatSfxBank.Play(StomachAbyss.Combat.CombatSfxId.VirgilWhisper, 0.72f, 0.94f, 1.06f, 0.4f);
             VirgilDialoguePage[] pages = (!_hasSpoken && firstPages != null && firstPages.Length > 0)
                 ? firstPages
                 : repeatPages;
@@ -216,6 +246,16 @@ namespace StomachAbyss.Tutorial
 #endif
         }
 
+        private static bool WasMutatePressedThisFrame()
+        {
+#if ENABLE_INPUT_SYSTEM
+            Keyboard kb = Keyboard.current;
+            return kb != null && kb.fKey.wasPressedThisFrame;
+#else
+            return Input.GetKeyDown(KeyCode.F);
+#endif
+        }
+
         private void PopulateDefaultDialogueIfEmpty()
         {
             if (firstPages == null || firstPages.Length == 0)
@@ -258,6 +298,11 @@ namespace StomachAbyss.Tutorial
                         {
                             text = "Atravesse a Escadaria do Refluxo saltando os obstáculos (Q) e deslizando através dos jatos ácidos (Espaço) para não ser dissolvido.",
                             hintBadge = "TRAVESSIA:  [Q] Pular   |   [Espaço] Esquiva Invulnerável"
+                        },
+                        new VirgilDialoguePage
+                        {
+                            text = "Cada célula que tomba sob tua lâmina libera Biomassa pura. Traga-a até mim — posso tecê-la em tua própria carne para endurecer tua carapaça, acelerar teu metabolismo e afiar tua virulência.",
+                            hintBadge = "PRESSIONE [F] PERTO DE VIRGÍLIO PARA MUTAR BIOMASSA"
                         },
                         new VirgilDialoguePage
                         {
@@ -309,6 +354,11 @@ namespace StomachAbyss.Tutorial
                         {
                             text = "A Tênia não é apenas mais um parasita como nós... ela é apenas um dos servos do demônio que usurpou este corpo.",
                             hintBadge = string.Empty
+                        },
+                        new VirgilDialoguePage
+                        {
+                            text = "Cada célula que tomba sob tua lâmina libera Biomassa pura. Se ainda a carregas em tuas fibras, traga-a até mim antes do altar — posso tecê-la em tua carne para endurecer tua carapaça, acelerar teu metabolismo e afiar tua virulência.",
+                            hintBadge = "PRESSIONE [F] PERTO DE VIRGÍLIO PARA MUTAR BIOMASSA"
                         },
                         new VirgilDialoguePage
                         {

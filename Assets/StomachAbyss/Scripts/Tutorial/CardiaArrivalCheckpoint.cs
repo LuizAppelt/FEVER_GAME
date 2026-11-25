@@ -43,10 +43,11 @@ namespace StomachAbyss.Tutorial
             if (player == null) return;
 
             _triggered = true;
-            if (respawnPoint != null)
-            {
-                player.respawnPosition = respawnPoint.position;
-            }
+            player.respawnPosition = respawnPoint != null ? respawnPoint.position : transform.position;
+            player.RefillEstus();
+            player.Heal(player.maxHealth);
+            StomachAbyss.Combat.CombatCameraJuice.PunchFov(-2.0f, 0.35f);
+            StomachAbyss.Combat.CombatSfxBank.Play(StomachAbyss.Combat.CombatSfxId.CheckpointLit, 0.85f, 0.97f, 1.03f, 0.5f);
         }
     }
 }

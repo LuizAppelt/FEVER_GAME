@@ -67,7 +67,7 @@ namespace MapaEstomago
         public float comboResetWindow = 0.85f;
         public float slashReach = 2.85f;
         public float stingerReach = 3.45f;
-        public float[] comboDamages = new float[] { 12f, 12f, 14f, 19f };
+        public float[] comboDamages = new float[] { 13f, 14f, 16f, 22f };
         public float ardenteModeSlashBonusDamage = 2f;
         public float lightHitstopDuration = 0.024f;
         public float cameraShakeIntensity = 0.065f;
@@ -79,7 +79,7 @@ namespace MapaEstomago
         public float thrustDashDistance = 4.4f;
         public float thrustDashWidth = 1.2f;
         public float thrustDashCooldown = 0.65f;
-        public float thrustPierceDamage = 28f;
+        public float thrustPierceDamage = 34f;
         public float flameTrailSpacing = 0.85f;
         public float flameTrailRadius = 1.15f;
         public float flameTrailDuration = 3.2f;
@@ -89,6 +89,11 @@ namespace MapaEstomago
         public float flameFanBonusDamage = 10f;
         public float flameFanExtendSeconds = 0.5f;
         public float ardenteModeDuration = 3.5f;
+
+        [Header("Custo de Estamina")]
+        public float comboLightStaminaCost = 10f;
+        public float comboFinisherStaminaCost = 15f;
+        public float flameThrustStaminaCost = 24f;
 
         // IPlayerWeapon
         public string WeaponDisplayName => "Lamina Ardente";
@@ -565,6 +570,10 @@ namespace MapaEstomago
         private void TriggerNextComboMove()
         {
             EnsureRuntimeInitialized();
+            int nextStep = (_comboStep % 4) + 1;
+            float staminaCost = nextStep == 4 ? comboFinisherStaminaCost : comboLightStaminaCost;
+            if (_owner != null && !_owner.TryConsumeActionStamina(staminaCost)) return;
+
             Transform ownerTf = _owner != null ? _owner.transform : transform;
 
             if (TryGetCursorWorldTarget(ownerTf.position.y + 1.0f, out Vector3 cursorPt))
@@ -577,7 +586,7 @@ namespace MapaEstomago
                 }
             }
 
-            _comboStep = (_comboStep % 4) + 1;
+            _comboStep = nextStep;
 
             switch (_comboStep)
             {
@@ -586,31 +595,32 @@ namespace MapaEstomago
                     _moveDuration = slashR2LDuration;
                     _attackCooldownTimer = 0.16f;
                     _owner?.ApplyCombatLunge(ownerTf.forward, 3.8f, 0.09f);
-                    CombatSfxBank.Play(CombatSfxId.FlameSlashLight, 0.84f, 1.00f, 1.10f, 0.03f);
+                    CombatSfxBank.Play(CombatSfxId.FlameSlashLight, 0.90f, 0.96f, 1.05f, 0.03f);
                     break;
                 case 2:
                     _activeMove = ArdenteMoveType.SlashFastL2R;
                     _moveDuration = slashL2RDuration;
                     _attackCooldownTimer = 0.15f;
                     _owner?.ApplyCombatLunge(ownerTf.forward, 4.1f, 0.09f);
-                    CombatSfxBank.Play(CombatSfxId.FlameSlashLight, 0.86f, 1.10f, 1.22f, 0.03f);
+                    CombatSfxBank.Play(CombatSfxId.FlameSlashLightAlt, 0.92f, 0.97f, 1.06f, 0.03f);
                     break;
                 case 3:
                     _activeMove = ArdenteMoveType.SlashLowCross;
                     _moveDuration = slashLowCrossDuration;
                     _attackCooldownTimer = 0.16f;
                     _owner?.ApplyCombatLunge(ownerTf.forward, 4.5f, 0.10f);
-                    CombatSfxBank.Play(CombatSfxId.FlameSlashLight, 0.90f, 0.94f, 1.04f, 0.03f);
+                    CombatSfxBank.Play(CombatSfxId.FlameSlashLight, 0.94f, 0.92f, 1.01f, 0.03f);
                     break;
                 default:
                     _activeMove = ArdenteMoveType.QuickStinger;
                     _moveDuration = quickStingerDuration;
                     _attackCooldownTimer = 0.22f;
                     _owner?.ApplyCombatLunge(ownerTf.forward, 7.6f, 0.12f);
-                    CombatSfxBank.Play(CombatSfxId.FlameSlashLight, 0.94f, 1.18f, 1.28f, 0.03f);
+                    CombatSfxBank.Play(CombatSfxId.KatanaIaidoHeavy, 0.96f, 0.96f, 1.05f, 0.03f);
                     break;
             }
 
+            _owner?.ApplyAttackMovementSlow(0.76f, _moveDuration * 0.65f);
             _moveTimer = _moveDuration;
             _hitApplied = false;
             _comboResetTimer = comboResetWindow;
@@ -637,6 +647,7 @@ namespace MapaEstomago
             {
                 baseDmg += ardenteModeSlashBonusDamage;
             }
+            baseDmg *= StomachAbyss.Progression.BiomassProgressionSystem.GetDamageMultiplier();
 
             Vector3 hitCenter = ownerTf.position + ownerTf.forward * (reach * 0.56f) + Vector3.up * 0.95f;
             Vector3 swingDir = _activeMove switch
@@ -730,6 +741,7 @@ namespace MapaEstomago
             if (hitAnything)
             {
                 CombatHitstopManager.TriggerHitstop(lightHitstopDuration, 0.04f, false);
+                CombatCameraJuice.Shake(0.14f, 0.09f);
                 _isoCam?.TriggerShake(isStinger ? cameraShakeIntensity * 1.15f : cameraShakeIntensity * 0.8f, 0.08f);
             }
         }
@@ -752,6 +764,7 @@ namespace MapaEstomago
 
         private void ExecuteFlameThrustDash(float chargedTime)
         {
+            if (_owner != null && !_owner.TryConsumeActionStamina(flameThrustStaminaCost)) return;
             Transform ownerTf = _owner != null ? _owner.transform : transform;
             float chargeNorm = Mathf.InverseLerp(minChargeThreshold, Mathf.Max(minChargeThreshold + 0.05f, fullChargeTime), chargedTime);
             float powerScale = Mathf.Lerp(0.75f, 1.0f, chargeNorm);
@@ -762,7 +775,7 @@ namespace MapaEstomago
             _isDashingThrust = true;
             _dashTimer = thrustDashDuration;
             _activeDashDistance = thrustDashDistance * powerScale;
-            _activeDashDamage = Mathf.Round(thrustPierceDamage * powerScale);
+            _activeDashDamage = Mathf.Round(thrustPierceDamage * powerScale * StomachAbyss.Progression.BiomassProgressionSystem.GetDamageMultiplier());
             _dashHitRoots.Clear();
             _dashHitstopTriggered = false;
 
@@ -774,6 +787,8 @@ namespace MapaEstomago
             _owner?.TriggerWeaponFlash(new Color(2.4f, 0.85f, 0.18f, 1f), 0.24f, 2.4f);
 
             CombatSfxBank.Play(CombatSfxId.FlameThrustDash, 0.94f, 0.95f, 1.05f, 0.05f);
+            CombatCameraJuice.PunchFov(3.8f, 0.26f);
+            CombatCameraJuice.Shake(0.38f, 0.22f);
             _isoCam?.TriggerShake(0.14f, 0.14f);
 
             _lastTrailSpawnPos = ownerTf.position;

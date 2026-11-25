@@ -31,7 +31,7 @@ namespace MapaEstomago
         public float dodgeSpeed = 15.5f;
         public float dodgeDuration = 0.24f;
         public float dodgeIFrameDuration = 0.24f;
-        public float dodgeCooldown = 0.72f;
+        public float dodgeCooldown = 0.58f;
 
         [Header("Combate e Acao de Ataque (Fallback Sem Arma)")]
         public float attackCooldown = 0.68f;
@@ -47,19 +47,26 @@ namespace MapaEstomago
         public float currentHealth = 100f;
         public Vector3 respawnPosition;
         public float deathRespawnDelay = 1.55f;
+        [Tooltip("Multiplicador de velocidade ao andar dentro do lago de acido (viscosidade).")]
+        [Range(0.2f, 1f)]
+        public float acidMoveSpeedMultiplier = 0.52f;
+        [Tooltip("Duracao do derretimento no acido ao morrer queimado (estilo Boss Tenia).")]
+        public float acidMeltDuration = 1.90f;
 
-        [Header("Estamina (Esquiva e Corrida)")]
+        [Header("Estamina (Esquiva, Pulo, Corrida e Combate)")]
         public float maxStamina = 100f;
         public float currentStamina = 100f;
-        public float dodgeStaminaCost = 28f;
-        public float runStaminaDrainPerSec = 18f;
+        public float dodgeStaminaCost = 14f;
+        public float jumpStaminaCost = 5f;
+        public float unarmedAttackStaminaCost = 12f;
+        public float runStaminaDrainPerSec = 12f;
         public float staminaRegenDelay = 0.50f;
         public float staminaRegenRate = 42f;
         public float minStaminaToResumeRun = 10f;
 
         [Header("Cura Rapida / Estus (Tecla R)")]
-        public int maxEstusCharges = 2;
-        public int currentEstusCharges = 2;
+        public int maxEstusCharges = 3;
+        public int currentEstusCharges = 3;
         public float estusHealAmount = 45f;
         public float estusCooldown = 0.65f;
         public bool showDebugOnGui = false;
@@ -106,8 +113,20 @@ namespace MapaEstomago
         private Vector3 _externalSnareCenter;
         private float _externalSnareMaxRadius = 0.65f;
         private float _staminaRegenDelayTimer;
+        private float _verticalVelocity;
+
         private bool _staminaExhaustedLock;
         private float _estusCooldownTimer;
+        private float _attackMoveSlowMultiplier = 1f;
+        private float _attackMoveSlowTimer = 0f;
+        private int _inAcidPoolCount;
+        private bool _diedByAcid;
+        private bool _isMelting;
+        private MaterialPropertyBlock _meltMpb;
+
+        private static readonly int PropBaseColor = Shader.PropertyToID("_BaseColor");
+        private static readonly int PropColor = Shader.PropertyToID("_Color");
+        private static readonly int PropEmissionColor = Shader.PropertyToID("_EmissionColor");
 
         private static readonly int HashSpeed = Animator.StringToHash("Speed");
         private static readonly int HashMoveSpeedMult = Animator.StringToHash("MoveSpeedMultiplier");
@@ -125,6 +144,20 @@ namespace MapaEstomago
         {
             inputLocked = locked;
         }
+
+        public void SetInAcidPool(bool inAcid)
+        {
+            if (inAcid)
+            {
+                _inAcidPoolCount++;
+            }
+            else
+            {
+                _inAcidPoolCount = Mathf.Max(0, _inAcidPoolCount - 1);
+            }
+        }
+
+        public bool IsInAcidPool => _inAcidPoolCount > 0;
 
         public bool IsDead => _isDead;
         public bool IsDodging => _dodgeTimer > 0f;
@@ -220,6 +253,12 @@ namespace MapaEstomago
             _combatLungeTimer = Mathf.Max(_combatLungeTimer, duration);
         }
 
+        public void ApplyAttackMovementSlow(float speedMultiplier, float duration)
+        {
+            _attackMoveSlowMultiplier = Mathf.Clamp(speedMultiplier, 0.1f, 1f);
+            _attackMoveSlowTimer = Mathf.Max(_attackMoveSlowTimer, duration);
+        }
+
         public void TriggerWeaponFlash(Color hdrColor, float duration, float lightMult = 1.8f)
         {
             TriggerShaderFlash(hdrColor, duration);
@@ -310,6 +349,7 @@ namespace MapaEstomago
             if (_dodgeIFrameTimer > 0f) _dodgeIFrameTimer -= dt;
             if (_combatLungeTimer > 0f) _combatLungeTimer -= dt;
             if (_estusCooldownTimer > 0f) _estusCooldownTimer -= dt;
+            if (_attackMoveSlowTimer > 0f) _attackMoveSlowTimer -= dt;
             UpdateStaminaRegen(dt);
 
             if (!_isDead)
@@ -538,6 +578,7 @@ namespace MapaEstomago
         public void StartAttack()
         {
             if (_isDead) return;
+            if (!TryConsumeActionStamina(unarmedAttackStaminaCost)) return;
 
             _attackCooldownTimer = attackCooldown;
             _attackActiveTimer = 0.68f;
@@ -703,6 +744,14 @@ namespace MapaEstomago
                 {
                     targetSpeed *= Mathf.Max(0.1f, _activeWeapon.MoveSpeedMultiplier);
                 }
+                if (_attackMoveSlowTimer > 0f)
+                {
+                    targetSpeed *= _attackMoveSlowMultiplier;
+                }
+                if (_inAcidPoolCount > 0)
+                {
+                    targetSpeed *= Mathf.Clamp(acidMoveSpeedMultiplier, 0.2f, 1f);
+                }
 
                 if (_externalSnareTimer > 0f)
                 {
@@ -730,7 +779,7 @@ namespace MapaEstomago
             if (_cc.isGrounded)
             {
                 if (_velocity.y < 0f) _velocity.y = -2f;
-                if (jumpPressed)
+                if (jumpPressed && TryConsumeActionStamina(jumpStaminaCost))
                 {
                     _velocity.y = Mathf.Sqrt(2f * jumpHeight * gravity);
                     _dodgeStartedGrounded = false;
@@ -821,7 +870,7 @@ namespace MapaEstomago
 
         private void HandleVisualRollAndBob(float dt)
         {
-            if (visualRoot == null) return;
+            if (visualRoot == null || _isMelting) return;
 
             if (IsDodging)
             {
@@ -861,7 +910,13 @@ namespace MapaEstomago
 
             if (_cc.isGrounded && speed > 0.2f)
             {
+                int prevStep = Mathf.FloorToInt(_bobTimer / Mathf.PI);
                 _bobTimer += dt * walkBobFrequency * (speed / walkSpeed);
+                int currStep = Mathf.FloorToInt(_bobTimer / Mathf.PI);
+                if (currStep > prevStep)
+                {
+                    CombatSfxBank.Play(CombatSfxId.PlayerFootstepFlesh, 0.28f, 0.88f, 1.14f, 0.14f);
+                }
                 float sinWave = Mathf.Sin(_bobTimer);
                 float cosWave = Mathf.Cos(_bobTimer * 0.5f);
 
@@ -892,12 +947,27 @@ namespace MapaEstomago
 
         public void TakeAcidDamage(float amount)
         {
+            ApplyIncomingDamage(amount, isAcidSource: false);
+        }
+
+        public void TakeEnvironmentalAcidDamage(float amount)
+        {
+            ApplyIncomingDamage(amount, isAcidSource: true);
+        }
+
+        private void ApplyIncomingDamage(float amount, bool isAcidSource)
+        {
             if (_isDead || IsInvulnerable) return;
 
             currentHealth = Mathf.Max(0f, currentHealth - amount);
-            TriggerShaderFlash(new Color(0.55f, 2.0f, 0.20f, 1f), 0.20f);
+            Color flashCol = isAcidSource
+                ? new Color(0.35f, 2.2f, 0.16f, 1f)
+                : new Color(0.55f, 2.0f, 0.20f, 1f);
+            TriggerShaderFlash(flashCol, 0.20f);
+            CombatCameraJuice.Shake(amount >= 15f ? 0.42f : 0.18f, 0.22f);
+            CombatCameraJuice.TriggerDamageVignette(amount >= 15f ? 0.68f : 0.40f, isAcid: isAcidSource);
 
-            if (_hurtSfxCooldownTimer <= 0f)
+            if (!isAcidSource && _hurtSfxCooldownTimer <= 0f)
             {
                 _hurtSfxCooldownTimer = amount <= 8f ? 0.48f : 0.22f;
                 CombatSfxBank.Play(CombatSfxId.PlayerHurt, amount <= 8f ? 0.58f : 0.86f, 0.94f, 1.06f, 0.15f);
@@ -907,16 +977,20 @@ namespace MapaEstomago
             {
                 _playerBloodCooldownTimer = amount <= 8f ? 0.56f : 0.24f;
                 Vector3 splatterDir = (-transform.forward + Vector3.up * 0.25f).normalized;
+                Color splatterColor = isAcidSource
+                    ? new Color(0.32f, 0.96f, 0.14f, 1f)
+                    : new Color(0.76f, 0.08f, 0.14f, 1f);
                 BloodSplatterSystem.SpawnBloodBurst(
                     transform.position + Vector3.up * 0.82f,
                     splatterDir,
                     amount <= 8f ? 0.44f : 0.78f,
-                    new Color(0.76f, 0.08f, 0.14f, 1f),
+                    splatterColor,
                     false);
             }
 
             if (currentHealth <= 0f)
             {
+                _diedByAcid = isAcidSource || _inAcidPoolCount > 0;
                 StartCoroutine(DeathAndRespawnRoutine());
                 return;
             }
@@ -990,6 +1064,8 @@ namespace MapaEstomago
         private IEnumerator DeathAndRespawnRoutine()
         {
             _isDead = true;
+            StomachAbyss.Progression.BiomassProgressionSystem.DropBiomassCocoon(transform.position);
+            bool meltInAcid = _diedByAcid || _inAcidPoolCount > 0;
             ClearAllConditions();
 
             if (animator != null)
@@ -1001,37 +1077,233 @@ namespace MapaEstomago
                 animator.CrossFadeInFixedTime("Death", 0.08f, 0, 0f);
             }
 
-            TriggerShaderFlash(new Color(1.8f, 0.25f, 0.35f, 1f), 0.45f);
-            Debug.Log("[Virus Player] Eliminado pelo acido! Executando animacao Death...");
+            if (meltInAcid)
+            {
+                _isMelting = true;
+                CombatSfxBank.Play(CombatSfxId.PlayerAcidBurn, 0.95f, 0.72f, 0.84f, 0.08f);
+                CombatCameraJuice.TriggerDamageVignette(0.75f, isAcid: true);
+                SpawnAcidMeltVfx(transform.position + Vector3.up * 0.25f);
+                Debug.Log("[Virus Player] Derretendo no acido gastrico!");
 
-            yield return new WaitForSeconds(deathRespawnDelay);
+                float duration = Mathf.Max(0.6f, acidMeltDuration);
+                float elapsed = 0f;
+                Vector3 startScale = visualRoot != null ? visualRoot.localScale : _visualInitialScale;
+                Vector3 startPos = visualRoot != null ? visualRoot.localPosition : _visualInitialLocalPos;
+                float nextSizzleTime = 0.45f;
+
+                while (elapsed < duration)
+                {
+                    elapsed += Time.deltaTime;
+                    float t = Mathf.Clamp01(elapsed / duration);
+                    float meltEase = t * t * (3f - 2f * t);
+
+                    if (elapsed >= nextSizzleTime)
+                    {
+                        nextSizzleTime += 0.45f;
+                        CombatSfxBank.Play(CombatSfxId.PlayerAcidBurn, 0.58f * (1f - t * 0.45f), 0.76f, 0.92f, 0.05f);
+                    }
+
+                    if (visualRoot != null)
+                    {
+                        // Igual ao Boss Tenia: achata no eixo Y e espalha em X/Z formando poca acida
+                        float spreadXZ = 1f + 0.55f * meltEase;
+                        float squashY = Mathf.Lerp(1f, 0.04f, meltEase);
+
+                        // Nos ultimos 25%, dissolve totalmente no lago
+                        float vanishMult = t > 0.75f ? Mathf.Lerp(1f, 0.02f, (t - 0.75f) / 0.25f) : 1f;
+                        visualRoot.localScale = new Vector3(
+                            startScale.x * spreadXZ * vanishMult,
+                            startScale.y * squashY * vanishMult,
+                            startScale.z * spreadXZ * vanishMult
+                        );
+                        visualRoot.localPosition = new Vector3(
+                            startPos.x,
+                            Mathf.Lerp(startPos.y, startPos.y - 0.35f, meltEase),
+                            startPos.z
+                        );
+                    }
+
+                    ApplyAcidMeltTint(meltEase);
+                    yield return null;
+                }
+            }
+            else
+            {
+                CombatSfxBank.Play(CombatSfxId.PlayerDeath, 0.92f, 0.96f, 1.02f, 0.25f);
+                TriggerShaderFlash(new Color(1.8f, 0.25f, 0.35f, 1f), 0.45f);
+                Debug.Log("[Virus Player] Eliminado! Executando animacao Death...");
+                yield return new WaitForSeconds(deathRespawnDelay);
+            }
 
             DieAndRespawn();
+        }
+
+        private void ApplyAcidMeltTint(float melt01)
+        {
+            if (_renderers == null) return;
+            if (_meltMpb == null) _meltMpb = new MaterialPropertyBlock();
+
+            float t = Mathf.Clamp01(melt01);
+            float pulse = 0.88f + 0.18f * Mathf.Sin(Time.time * 8.5f);
+            Color acidBase = new Color(0.28f, 0.92f, 0.15f, 1f);
+            Color acidEmission = new Color(0.45f, 1.95f, 0.16f, 1f) * (t * pulse);
+
+            for (int i = 0; i < _renderers.Length; i++)
+            {
+                Renderer r = _renderers[i];
+                if (r == null || r.sharedMaterial == null) continue;
+
+                r.GetPropertyBlock(_meltMpb);
+                Color origCol = (_origColors != null && i < _origColors.Length) ? _origColors[i] : Color.white;
+
+                if (r.sharedMaterial.HasProperty(PropBaseColor))
+                {
+                    _meltMpb.SetColor(PropBaseColor, Color.Lerp(origCol, acidBase, t * 0.92f));
+                }
+                else if (r.sharedMaterial.HasProperty(PropColor))
+                {
+                    _meltMpb.SetColor(PropColor, Color.Lerp(origCol, acidBase, t * 0.92f));
+                }
+
+                if (r.sharedMaterial.HasProperty(PropEmissionColor))
+                {
+                    _meltMpb.SetColor(PropEmissionColor, acidEmission);
+                }
+
+                if (r.sharedMaterial.HasProperty(PropHitFlash))
+                {
+                    _meltMpb.SetColor(PropHitFlashColor, new Color(0.42f, 2.0f, 0.16f, 1f));
+                    _meltMpb.SetFloat(PropHitFlash, t * 0.65f * pulse);
+                }
+
+                r.SetPropertyBlock(_meltMpb);
+            }
+        }
+
+        private void ResetAcidMeltVisuals()
+        {
+            _isMelting = false;
+            _diedByAcid = false;
+            _inAcidPoolCount = 0;
+
+            if (visualRoot != null)
+            {
+                visualRoot.localScale = _visualInitialScale;
+                visualRoot.localPosition = _visualInitialLocalPos;
+                visualRoot.localRotation = _visualInitialLocalRot;
+            }
+
+            if (_renderers != null)
+            {
+                for (int i = 0; i < _renderers.Length; i++)
+                {
+                    Renderer r = _renderers[i];
+                    if (r == null) continue;
+                    r.enabled = true;
+                    r.SetPropertyBlock(null);
+                    if (r.material != null && r.material.HasProperty(PropHitFlash))
+                    {
+                        r.material.SetFloat(PropHitFlash, 0f);
+                    }
+                }
+            }
+            inputLocked = false;
+            if (IsometricCameraFollow.Instance != null)
+            {
+                IsometricCameraFollow.Instance.lockInput = false;
+            }
+        }
+
+        private static void SpawnAcidMeltVfx(Vector3 worldPos)
+        {
+            GameObject fxObj = new GameObject("PlayerAcidMeltFX");
+            fxObj.transform.position = worldPos;
+
+            ParticleSystem ps = fxObj.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            var main = ps.main;
+            main.playOnAwake = true;
+            main.loop = false;
+            main.duration = 1.9f;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.55f, 1.15f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(1.4f, 3.6f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.16f, 0.42f);
+            main.gravityModifier = -0.25f;
+            main.startColor = new ParticleSystem.MinMaxGradient(
+                new Color(0.32f, 1.0f, 0.16f, 0.92f),
+                new Color(0.78f, 1.0f, 0.35f, 0.85f)
+            );
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+
+            var emission = ps.emission;
+            emission.rateOverTime = 26f;
+            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 18) });
+
+            var shape = ps.shape;
+            shape.shapeType = ParticleSystemShapeType.Cone;
+            shape.angle = 38f;
+            shape.radius = 0.45f;
+            shape.rotation = new Vector3(-90f, 0f, 0f);
+
+            var sizeOverLife = ps.sizeOverLifetime;
+            sizeOverLife.enabled = true;
+            sizeOverLife.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.EaseInOut(0f, 0.7f, 1f, 0.1f));
+
+            var psRenderer = fxObj.GetComponent<ParticleSystemRenderer>();
+            Shader sh = Shader.Find("Universal Render Pipeline/Particles/Unlit") ?? Shader.Find("Particles/Standard Unlit");
+            if (sh != null)
+            {
+                Material mat = new Material(sh);
+                mat.color = new Color(0.45f, 1.0f, 0.22f, 0.9f);
+                psRenderer.sharedMaterial = mat;
+            }
+
+            ps.Play();
+            Destroy(fxObj, 3.4f);
         }
 
         public void DieAndRespawn()
         {
             _isDead = false;
+            DoorTransitionTrigger.ForceClearFade();
+            ResetAcidMeltVisuals();
             currentHealth = maxHealth;
             currentStamina = maxStamina;
             _staminaExhaustedLock = false;
             _staminaRegenDelayTimer = 0f;
+            _verticalVelocity = 0f;
             RefillEstus();
             OnStaminaChanged?.Invoke(currentStamina, maxStamina);
+
+            // Raycast downward from above respawnPosition so the player NEVER spawns inside/under the floor
+            Vector3 safeSpawn = respawnPosition + Vector3.up * 1.0f;
+            if (Physics.Raycast(respawnPosition + Vector3.up * 4.0f, Vector3.down, out RaycastHit groundHit, 12f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                safeSpawn = groundHit.point + Vector3.up * 0.35f;
+            }
 
             if (_cc != null)
             {
                 _cc.enabled = false;
-                transform.position = respawnPosition + Vector3.up * 0.4f;
+                transform.position = safeSpawn;
                 _cc.enabled = true;
             }
             else
             {
-                transform.position = respawnPosition + Vector3.up * 0.4f;
+                transform.position = safeSpawn;
             }
             _lastSafeGroundY = transform.position.y;
 
+            if (visualRoot != null)
+            {
+                if (!visualRoot.gameObject.activeSelf) visualRoot.gameObject.SetActive(true);
+                if (_visualInitialScale.sqrMagnitude > 0.001f) visualRoot.localScale = _visualInitialScale;
+                visualRoot.localPosition = _visualInitialLocalPos;
+                visualRoot.localRotation = _visualInitialLocalRot;
+            }
+
             ClearAllConditions();
+            ImmuneEnemies.ImmuneEnemyBase.RespawnAllEnemies();
 
             if (animator != null)
             {
@@ -1057,6 +1329,8 @@ namespace MapaEstomago
             _hurtSfxCooldownTimer = 0f;
             _playerBloodCooldownTimer = 0f;
             _estusCooldownTimer = 0f;
+            _attackMoveSlowTimer = 0f;
+            _attackMoveSlowMultiplier = 1f;
             _externalSnareTimer = 0f;
             _damageFlashTimer = 0f;
             _velocity = Vector3.zero;
@@ -1099,6 +1373,22 @@ namespace MapaEstomago
         public void SetRespawnPoint(Vector3 pos)
         {
             respawnPosition = pos;
+        }
+
+        /// <summary>
+        /// Tenta consumir estamina para ataques/habilidades/pulo (estilo Souls: permite o golpe
+        /// se nao estiver exausto, descontando ate 0 e iniciando o delay de regeneracao).
+        /// </summary>
+        public bool TryConsumeActionStamina(float cost)
+        {
+            if (cost <= 0f) return true;
+            float minRequired = Mathf.Min(cost, 4f);
+            if (currentStamina < minRequired)
+            {
+                return false;
+            }
+            SpendStamina(cost);
+            return true;
         }
 
         private void SpendStamina(float amount)
@@ -1149,7 +1439,7 @@ namespace MapaEstomago
             _estusCooldownTimer = estusCooldown;
             Heal(estusHealAmount);
             EmitCombatParticles(transform.position + Vector3.up * 0.85f, Quaternion.LookRotation(Vector3.up), 18);
-            CombatSfxBank.Play(CombatSfxId.WhipFatigueReady, 0.72f, 1.12f, 1.24f, 0.05f);
+            CombatSfxBank.Play(CombatSfxId.PlayerHeal, 0.88f, 0.97f, 1.04f, 0.08f);
 
             OnEstusChanged?.Invoke(currentEstusCharges, maxEstusCharges);
             OnEstusUsed?.Invoke();
@@ -1225,6 +1515,7 @@ namespace MapaEstomago
             CombatSfxBank.EnsureExists();
             CombatHitstopManager.EnsureExists();
             BloodSplatterSystem.EnsureExists();
+            CombatCameraJuice.EnsureExists();
         }
 
         private void OnGUI()

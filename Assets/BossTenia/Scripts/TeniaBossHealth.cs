@@ -14,8 +14,8 @@ namespace BossTenia
     public class TeniaBossHealth : MonoBehaviour, IAcidDamageable
     {
         [Header("Vida do Boss")]
-        public float maxHealth = 2400f;
-        public float currentHealth = 2400f;
+        public float maxHealth = 1700f;
+        public float currentHealth = 1700f;
 
         [Range(0.05f, 0.95f)]
         public float phase2ThresholdNormalized = 0.5f;
@@ -219,6 +219,11 @@ namespace BossTenia
                     bloodIntensity *= Mathf.Clamp(BloodSplatterSystem.ContextIntensityMult, 0.75f, 1.35f);
                 }
                 BloodSplatterSystem.SpawnBloodBurst(bloodPos, bloodDir, bloodIntensity, null, effectiveWeakSpot);
+
+                if (effectiveWeakSpot)
+                {
+                    CombatCameraJuice.Shake(0.35f, 0.20f);
+                }
             }
 
             OnDamaged?.Invoke(deltaDamage, hitPos, isWeakSpot);
@@ -231,6 +236,8 @@ namespace BossTenia
             if (currentHealth <= 0f && !IsDead)
             {
                 IsDead = true;
+                CombatCameraJuice.Shake(0.65f, 0.45f);
+                CombatCameraJuice.PunchFov(-3.5f, 0.35f);
                 OnDefeated?.Invoke();
             }
         }
@@ -350,6 +357,7 @@ namespace BossTenia
                 ApplyBaseVisualState();
             }
 
+            CombatCameraJuice.Shake(0.45f, 0.30f);
             OnPhase2Entered?.Invoke();
         }
 

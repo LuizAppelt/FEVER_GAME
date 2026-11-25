@@ -439,8 +439,11 @@ namespace MapaEstomago
 
             if (Application.isPlaying)
             {
-                float blend = 1f - Mathf.Exp(-Mathf.Max(0.5f, blendSpeed) * Time.deltaTime);
-                if (_runtimeDistance <= 0.1f) _runtimeDistance = distance;
+                HandleZoomHotkeys(Time.unscaledDeltaTime);
+                targetDistance *= StomachAbyss.UI.GameSettingsManager.CameraDistanceScale;
+                float dt = Time.unscaledDeltaTime;
+                float blend = 1f - Mathf.Exp(-Mathf.Max(0.5f, blendSpeed) * dt);
+                if (_runtimeDistance <= 0.1f) _runtimeDistance = targetDistance;
                 if (_runtimeFov <= 1f) _runtimeFov = fieldOfView;
                 if (_runtimePitch <= 0.1f) _runtimePitch = pitchAngle;
 
@@ -486,6 +489,35 @@ namespace MapaEstomago
             }
 
             transform.rotation = rot;
+        }
+
+        private void HandleZoomHotkeys(float dt)
+        {
+            if (lockInput || Time.timeScale <= 0f) return;
+
+            bool zoomIn = false;
+            bool zoomOut = false;
+
+#if ENABLE_INPUT_SYSTEM
+            var kb = Keyboard.current;
+            if (kb != null)
+            {
+                zoomIn = kb.equalsKey.isPressed || kb.numpadPlusKey.isPressed;
+                zoomOut = kb.minusKey.isPressed || kb.numpadMinusKey.isPressed;
+            }
+#else
+            zoomIn = Input.GetKey(KeyCode.Equals) || Input.GetKey(KeyCode.Plus) || Input.GetKey(KeyCode.KeypadPlus);
+            zoomOut = Input.GetKey(KeyCode.Minus) || Input.GetKey(KeyCode.KeypadMinus);
+#endif
+
+            if (zoomIn == zoomOut) return;
+
+            float delta = (zoomOut ? 1f : -1f) * 0.45f * dt;
+            float next = Mathf.Clamp(StomachAbyss.UI.GameSettingsManager.CameraDistanceScale + delta, 0.70f, 1.35f);
+            if (!Mathf.Approximately(next, StomachAbyss.UI.GameSettingsManager.CameraDistanceScale))
+            {
+                StomachAbyss.UI.GameSettingsManager.SetCameraDistanceScale(next);
+            }
         }
     }
 }

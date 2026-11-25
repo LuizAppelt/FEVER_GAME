@@ -109,15 +109,9 @@ namespace MapaEstomago
             if (_hoveringAtApex)
             {
                 _apexHoverTimer -= dt;
-                _apexTickTimer -= dt;
-                if (_apexTickTimer <= 0f)
-                {
-                    _apexTickTimer = 0.20f;
-                    _hitOutbound.Clear();
-                    EvaluateHitAround(transform.position, _hitOutbound);
-                }
 
-                // Enquanto a espada estiver totalmente sem laminas no cooldown de ~5s, segura as laminas no apice antes de voltar
+                // Enquanto a espada estiver totalmente sem laminas no cooldown de recarga,
+                // segura as laminas no apice girando apenas visualmente (sem dano continuo infinito)
                 if (_apexHoverTimer <= 0f && !_owner.ShouldDelayBladeReturn)
                 {
                     _hoveringAtApex = false;

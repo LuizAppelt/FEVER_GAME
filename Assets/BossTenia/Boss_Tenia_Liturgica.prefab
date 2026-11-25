@@ -4092,8 +4092,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 50ac99f2b17274f478f15c7da3afb82a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BossTenia.TeniaBossHealth
-  maxHealth: 2400
-  currentHealth: 2400
+  maxHealth: 1700
+  currentHealth: 1700
   phase2ThresholdNormalized: 0.5
   bossDisplayName: MALPHAS, A TENIA LITURGICA
   phase2Subtitle: COROADA EM BILE LITURGICA
