@@ -7229,9 +7229,25 @@ MonoBehaviour:
   m_GameObject: {fileID: 560520210}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 967327617}
+  m_Script: {fileID: 11500000, guid: a4f9c2e17b3d48509a1e6c8f2b4d7093, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::StomachAbyss.MainMenu.MainMenuGothicButton
+  owner: {fileID: 0}
+  targetRect: {fileID: 0}
+  baseAnchoredPosition: {x: 0, y: 0}
+  backingPlate: {fileID: 0}
+  topBorder: {fileID: 0}
+  bottomBorder: {fileID: 0}
+  leftAccent: {fileID: 0}
+  rightAccent: {fileID: 0}
+  diamondMarker: {fileID: 0}
+  diamondCore: {fileID: 0}
+  labelText: {fileID: 0}
+  normalPlateColor: {r: 0.06, g: 0.015, b: 0.025, a: 0.8}
+  hoverPlateColor: {r: 0.22, g: 0.03, b: 0.05, a: 0.95}
+  normalTextColor: {r: 0.86, g: 0.77, b: 0.76, a: 0.9}
+  hoverTextColor: {r: 1, g: 0.95, b: 0.92, a: 1}
+  isPrimaryButton: 0
 --- !u!222 &560520214
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -7390,7 +7406,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 0, y: 1}
   m_AnchoredPosition: {x: 58, y: -38}
-  m_SizeDelta: {x: 708.0833, y: 540.0923}
+  m_SizeDelta: {x: 835.0184, y: 672.2849}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &621716070
 MonoBehaviour:
@@ -12817,9 +12833,25 @@ MonoBehaviour:
   m_GameObject: {fileID: 732258415}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 967327617}
+  m_Script: {fileID: 11500000, guid: a4f9c2e17b3d48509a1e6c8f2b4d7093, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::StomachAbyss.MainMenu.MainMenuGothicButton
+  owner: {fileID: 0}
+  targetRect: {fileID: 0}
+  baseAnchoredPosition: {x: 0, y: 0}
+  backingPlate: {fileID: 0}
+  topBorder: {fileID: 0}
+  bottomBorder: {fileID: 0}
+  leftAccent: {fileID: 0}
+  rightAccent: {fileID: 0}
+  diamondMarker: {fileID: 0}
+  diamondCore: {fileID: 0}
+  labelText: {fileID: 0}
+  normalPlateColor: {r: 0.06, g: 0.015, b: 0.025, a: 0.8}
+  hoverPlateColor: {r: 0.22, g: 0.03, b: 0.05, a: 0.95}
+  normalTextColor: {r: 0.86, g: 0.77, b: 0.76, a: 0.9}
+  hoverTextColor: {r: 1, g: 0.95, b: 0.92, a: 1}
+  isPrimaryButton: 0
 --- !u!222 &732258419
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -13835,21 +13867,6 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 966933278}
   m_Mesh: {fileID: 4300000, guid: 97bbd69268533bb4baf385aa02e64d3b, type: 2}
---- !u!115 &967327617
-MonoScript:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_Name: 
-  serializedVersion: 7
-  m_DefaultReferences: {}
-  m_Icon: {fileID: 0}
-  m_Type: 0
-  m_ExecutionOrder: 0
-  m_ClassName: MainMenuGothicButton
-  m_Namespace: StomachAbyss.MainMenu
-  m_AssemblyName: Assembly-CSharp
 --- !u!1 &1016759299
 GameObject:
   m_ObjectHideFlags: 0
@@ -15804,7 +15821,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 1589724638}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 967327617}
+  m_Script: {fileID: 11500000, guid: a4f9c2e17b3d48509a1e6c8f2b4d7093, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::StomachAbyss.MainMenu.MainMenuGothicButton
   owner: {fileID: 205792797}
@@ -17762,7 +17779,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 2108968671}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 967327617}
+  m_Script: {fileID: 11500000, guid: a4f9c2e17b3d48509a1e6c8f2b4d7093, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::StomachAbyss.MainMenu.MainMenuGothicButton
   owner: {fileID: 205792797}
